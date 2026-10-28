@@ -1,61 +1,9 @@
-import { Shield, CheckCircle, ArrowUpRight, Info, Clock } from "lucide-react";
+import { useState } from "react";
+import { Shield, CheckCircle, ArrowUpRight, AlertCircle, X } from "lucide-react";
 import SectionCard from "../components/SectionCard";
 import GoldBadge from "../components/GoldBadge";
-
-const packages = [
-  {
-    amount: 100,
-    dailyRate: "0.50%",
-    split: "0.25% + 0.25%",
-    cap: "2X",
-    capAmount: "$200",
-    color: "blue",
-    label: "Starter",
-    features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible"],
-  },
-  {
-    amount: 300,
-    dailyRate: "0.60%",
-    split: "0.30% + 0.30%",
-    cap: "2X",
-    capAmount: "$600",
-    color: "purple",
-    label: "Silver",
-    features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible"],
-  },
-  {
-    amount: 500,
-    dailyRate: "0.70%",
-    split: "0.35% + 0.35%",
-    cap: "2X",
-    capAmount: "$1,000",
-    color: "gold",
-    label: "Gold",
-    features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible"],
-  },
-  {
-    amount: 1000,
-    dailyRate: "1.00%",
-    split: "0.50% + 0.50%",
-    cap: "2X",
-    capAmount: "$2,000",
-    color: "green",
-    label: "Elite",
-    popular: true,
-    features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible", "Sub-IDs allowed (after 10 min)", "Reinvest wallet eligible"],
-  },
-];
-
-const daoPackage = {
-  amount: 5000,
-  dailyRate: "1.00%",
-  split: "0.50% + 0.50%",
-  cap: "3X",
-  capAmount: "$15,000",
-  daoIncentive: "5% weekly (DAO Pool)",
-  durationDays: 500,
-  leaderCap: "5X",
-};
+import DataUnavailable from "../components/DataUnavailable";
+import { useWeb3 } from "../../context/Web3Context";
 
 const colorMap = {
   blue: {
@@ -89,6 +37,71 @@ const colorMap = {
 };
 
 export default function Packages() {
+  const {
+    userStakes,
+    totalStaked,
+    usdtBalance,
+    daoMemberCount,
+    maxDaoMembers,
+    isDAO,
+    packages,
+    isLoading,
+    stake,
+    isTransacting,
+  } = useWeb3();
+
+  const [modalPkg, setModalPkg] = useState(null);
+  const [amountInput, setAmountInput] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const activeStakes = userStakes.filter((s) => s.active);
+  const totalClaimed = userStakes.reduce(
+    (acc, s) => acc + (parseFloat(s.totalClaimed) || 0),
+    0
+  );
+  const totalCap = userStakes.reduce(
+    (acc, s) => acc + (parseFloat(s.cap) || 0),
+    0
+  );
+  const remainingCap = Math.max(0, totalCap - totalClaimed);
+  const availablePackages = packages.filter((pkg) => !pkg.isDAO);
+  const daoPackage = packages.find((pkg) => pkg.isDAO);
+  const daoCapacityAvailable = daoMemberCount !== null && maxDaoMembers !== null;
+  const daoMemberSummary = daoCapacityAvailable
+    ? `${daoMemberCount} / ${maxDaoMembers}`
+    : "Unavailable";
+
+  const handleOpenStake = (pkg) => {
+    setModalPkg(pkg);
+    setAmountInput(pkg.minAmount);
+    setErrorMsg("");
+  };
+
+  const handleStakeSubmit = async () => {
+    if (!modalPkg) return;
+    const num = parseFloat(amountInput);
+    const minimum = parseFloat(modalPkg.minAmount);
+    if (isNaN(num) || num < minimum) {
+      setErrorMsg(`Minimum amount is $${minimum}`);
+      return;
+    }
+    if (modalPkg.isDAO && num % 1000 !== 0) {
+      setErrorMsg("DAO top-ups must be in multiples of $1,000");
+      return;
+    }
+
+    if (num > parseFloat(usdtBalance || "0")) {
+      setErrorMsg(`Insufficient USDT balance ($${parseFloat(usdtBalance).toFixed(2)})`);
+      return;
+    }
+
+    setErrorMsg("");
+    const res = await stake(modalPkg.id, num);
+    if (res.success) {
+      setModalPkg(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Info */}
@@ -99,35 +112,43 @@ export default function Packages() {
         <div>
           <p className="text-[14px] font-semibold text-white">Staking Packages</p>
           <p className="text-[12px] text-[#A3A3A3]">
-            All packages divided and credited every 12 hours. No P2P transfers allowed internally. Capping: 2X for Investors, 4X for Networkers.
+            Package minimums, daily rates, caps, and active status are read from the staking contract. ROI accrues in completed 12-hour periods.
           </p>
         </div>
       </div>
 
-      {/* Current Package */}
-      <SectionCard title="Your Active Package">
+      {/* Current Active Package Status */}
+      <SectionCard title="Your Active Position">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-lg border border-[#FFB51D]/20 bg-[#FFB51D]/5 p-4">
           <div className="flex items-center gap-4">
             <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#FFE28A] to-[#FFB51D] flex items-center justify-center">
               <Shield size={22} className="text-black" />
             </div>
             <div>
-              <p className="text-[16px] font-bold text-white">$1,000 Elite Package</p>
-              <p className="text-[12px] text-[#A3A3A3]">Active · 1.00% daily · Credited every 12h</p>
+              <p className="text-[16px] font-bold text-white">
+                {activeStakes.length > 0
+                  ? `$${parseFloat(totalStaked).toLocaleString()} Total Staked`
+                  : "No Active Stakes"}
+              </p>
+              <p className="text-[12px] text-[#A3A3A3]">
+                {activeStakes.length > 0
+                  ? `${activeStakes.length} active position(s) · Credited every 12h`
+                  : "Select a package below to activate your account"}
+              </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <GoldBadge>Earning 1% Daily</GoldBadge>
-            <GoldBadge>14 days active</GoldBadge>
+            {isDAO && <GoldBadge>DAO Membership On-Chain</GoldBadge>}
+            <GoldBadge>{activeStakes.length > 0 ? "● Earning On-Chain" : "Ready to Stake"}</GoldBadge>
           </div>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            { label: "Invested", value: "$1,000" },
-            { label: "Earned", value: "$140.00" },
-            { label: "Cap (2X)", value: "$2,000" },
-            { label: "Remaining", value: "$1,860" },
+            { label: "Total Invested", value: `$${parseFloat(totalStaked || "0").toLocaleString()}` },
+            { label: "Total Claimed", value: `$${totalClaimed.toFixed(2)}` },
+            { label: "Position Caps", value: `$${totalCap.toFixed(2)}` },
+            { label: "Remaining Cap", value: `$${remainingCap.toFixed(2)}` },
           ].map((item) => (
             <div key={item.label} className="rounded-lg border border-[#222] bg-[#0A0A0A] p-3 text-center">
               <p className="text-[11px] text-[#737373]">{item.label}</p>
@@ -140,51 +161,62 @@ export default function Packages() {
       {/* Package Cards */}
       <div>
         <h3 className="mb-4 text-[15px] font-semibold text-white">Available Packages</h3>
+        {availablePackages.length === 0 ? (
+          <DataUnavailable>
+            {isLoading
+              ? "Loading active packages from the staking contract…"
+              : "The staking contract did not return any standard packages."}
+          </DataUnavailable>
+        ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {packages.map((pkg) => {
-            const c = colorMap[pkg.color];
+          {availablePackages.map((pkg) => {
+            const amount = Number(pkg.minAmount);
+            const dailyRate = pkg.dailyRateBps / 100;
+            const color = ["blue", "purple", "gold", "green"][pkg.id % 4];
+            const c = colorMap[color];
+            const label = pkg.isDAO ? "DAO Package" : `Package ${pkg.id + 1}`;
+            const capAmount = amount * pkg.capMultiplier;
             return (
               <div
-                key={pkg.amount}
+                key={pkg.id}
                 className={`relative overflow-hidden rounded-xl border ${c.border} bg-[#111] p-5 flex flex-col transition-all hover:-translate-y-1 hover:shadow-xl`}
               >
-                {pkg.popular && (
-                  <div className="absolute right-0 top-0 rounded-bl-xl bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] px-3 py-1">
-                    <span className="text-[10px] font-bold text-black">POPULAR</span>
-                  </div>
-                )}
                 <div className={`pointer-events-none absolute bottom-0 right-0 h-32 w-32 rounded-full ${c.glow} blur-3xl`} />
 
                 {/* Label */}
                 <span className={`inline-flex w-fit items-center rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${c.badge}`}>
-                  {pkg.label}
+                  {label}
                 </span>
+                {!pkg.active && <GoldBadge>Inactive</GoldBadge>}
 
                 {/* Amount */}
                 <div className="mt-4">
                   <p className="text-[11px] text-[#737373] uppercase tracking-wider">Package Amount</p>
-                  <p className="text-[28px] font-bold text-white">${pkg.amount.toLocaleString()}</p>
+                  <p className="text-[28px] font-bold text-white">${amount.toLocaleString()}</p>
                 </div>
 
                 {/* Rate */}
                 <div className="mt-3 rounded-lg border border-[#222] bg-[#0A0A0A] p-3">
                   <div className="flex justify-between">
                     <span className="text-[11px] text-[#737373]">Daily Rate</span>
-                    <span className={`text-[13px] font-bold ${c.rate}`}>{pkg.dailyRate}</span>
+                    <span className={`text-[13px] font-bold ${c.rate}`}>{dailyRate.toFixed(2)}%</span>
                   </div>
                   <div className="mt-2 flex justify-between">
                     <span className="text-[11px] text-[#737373]">12h Split</span>
-                    <span className="text-[12px] text-[#A3A3A3]">{pkg.split}</span>
+                    <span className="text-[12px] text-[#A3A3A3]">{(dailyRate / 2).toFixed(2)}% + {(dailyRate / 2).toFixed(2)}%</span>
                   </div>
                   <div className="mt-2 flex justify-between">
                     <span className="text-[11px] text-[#737373]">Cap</span>
-                    <span className={`text-[12px] font-semibold ${c.rate}`}>{pkg.cap} → {pkg.capAmount}</span>
+                    <span className={`text-[12px] font-semibold ${c.rate}`}>{pkg.capMultiplier}X → ${capAmount.toLocaleString()}</span>
                   </div>
                 </div>
 
-                {/* Features */}
                 <ul className="mt-4 space-y-2 flex-1">
-                  {pkg.features.map((f) => (
+                  {[
+                    "12-hour ROI accrual periods",
+                    `${pkg.capMultiplier}X position cap`,
+                    "5% direct referral payout when a referrer is registered",
+                  ].map((f) => (
                     <li key={f} className="flex items-start gap-2">
                       <CheckCircle size={13} className={`mt-0.5 shrink-0 ${c.rate}`} />
                       <span className="text-[11px] text-[#A3A3A3]">{f}</span>
@@ -193,7 +225,9 @@ export default function Packages() {
                 </ul>
 
                 <button
-                  className={`mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r ${c.btn} py-2.5 text-[13px] font-semibold ${pkg.color === "gold" ? "text-black" : "text-white"} transition-all hover:brightness-110`}
+                  onClick={() => handleOpenStake(pkg)}
+                  disabled={!pkg.active}
+                  className={`mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r ${c.btn} py-2.5 text-[13px] font-semibold text-white transition-all hover:brightness-110 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50`}
                 >
                   Stake Now <ArrowUpRight size={14} />
                 </button>
@@ -201,10 +235,18 @@ export default function Packages() {
             );
           })}
         </div>
+        )}
       </div>
 
       {/* DAO Package */}
-      <SectionCard title="Special DAO Package" subtitle="Premium membership with enhanced benefits">
+      <SectionCard title="DAO Package" subtitle="DAO package terms read from the staking contract">
+        {!daoPackage ? (
+          <DataUnavailable>
+            {isLoading
+              ? "Loading DAO package configuration from the staking contract…"
+              : "The staking contract did not return a DAO package."}
+          </DataUnavailable>
+        ) : (
         <div className="relative overflow-hidden rounded-xl border border-[#FFB51D]/30 bg-gradient-to-br from-[#FFB51D]/5 via-[#111111] to-[#a78bfa]/5 p-5 sm:p-6">
           <div className="pointer-events-none absolute right-0 top-0 h-48 w-48 rounded-full bg-[#FFB51D]/5 blur-3xl" />
           <div className="pointer-events-none absolute left-0 bottom-0 h-32 w-32 rounded-full bg-purple-500/5 blur-2xl" />
@@ -216,21 +258,21 @@ export default function Packages() {
                   <Shield size={22} className="text-black" />
                 </div>
                 <div>
-                  <p className="text-[20px] font-bold text-white">$5,000 DAO Package</p>
-                  <GoldBadge>Limited: 300 Members</GoldBadge>
+                  <p className="text-[20px] font-bold text-white">${Number(daoPackage.minAmount).toLocaleString()} DAO Package</p>
+                  <GoldBadge>Members: {daoMemberSummary}</GoldBadge>
                 </div>
               </div>
               <p className="mt-3 text-[12px] text-[#A3A3A3] leading-relaxed">
-                Exclusive DAO membership active for 500 days. Receive 1% daily (split 12h) up to 3X cap ($15,000). DAO Network income is NOT included in 3X calculation.
+                DAO stakes require the minimum amount and top-ups in $1,000 multiples. The contract records a 500-day end timestamp and applies the cap multiplier shown here.
               </p>
             </div>
 
             <div className="space-y-3">
               {[
-                { label: "Daily Rate", value: "1.00%", color: "text-[#FFB51D]" },
-                { label: "Capping", value: "3X = $15,000", color: "text-green-400" },
-                { label: "Leader Cap", value: "5X (with network)", color: "text-purple-400" },
-                { label: "Duration", value: "500 Days", color: "text-[#FFB51D]" },
+                { label: "Daily Rate", value: `${(daoPackage.dailyRateBps / 100).toFixed(2)}%`, color: "text-[#FFB51D]" },
+                { label: "Capping", value: `${daoPackage.capMultiplier}X`, color: "text-green-400" },
+                { label: "Members Filled", value: daoMemberSummary, color: "text-purple-400" },
+                { label: "Minimum", value: `$${Number(daoPackage.minAmount).toLocaleString()}`, color: "text-[#FFB51D]" },
               ].map((item) => (
                 <div key={item.label} className="flex justify-between rounded-lg border border-[#222] bg-[#0A0A0A] px-3 py-2">
                   <span className="text-[11px] text-[#737373]">{item.label}</span>
@@ -241,10 +283,10 @@ export default function Packages() {
 
             <div className="space-y-3">
               {[
-                { label: "DAO Pool Share", value: "5% Weekly", color: "text-[#FFB51D]" },
-                { label: "Pool Distribution", value: "Equally split", color: "text-green-400" },
-                { label: "Top-up", value: "Multiples of $1,000", color: "text-[#FFB51D]" },
-                { label: "Payout", value: "Until $15K cap", color: "text-purple-400" },
+                { label: "Membership Limit", value: maxDaoMembers === null ? "Unavailable" : `${maxDaoMembers} members`, color: "text-[#FFB51D]" },
+                { label: "Top-up Rule", value: "Multiples of $1,000", color: "text-green-400" },
+                { label: "Membership Term", value: "500 days", color: "text-[#FFB51D]" },
+                { label: "DAO Pool Schedule", value: "Not exposed on-chain", color: "text-purple-400" },
               ].map((item) => (
                 <div key={item.label} className="flex justify-between rounded-lg border border-[#222] bg-[#0A0A0A] px-3 py-2">
                   <span className="text-[11px] text-[#737373]">{item.label}</span>
@@ -255,78 +297,90 @@ export default function Packages() {
           </div>
 
           <div className="relative mt-5 flex flex-col sm:flex-row gap-3">
-            <button className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black hover:brightness-110 transition-all">
+            <button
+              onClick={() => handleOpenStake(daoPackage)}
+              disabled={!daoPackage.active || !daoCapacityAvailable || (!isDAO && daoMemberCount >= maxDaoMembers)}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black hover:brightness-110 active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+            >
               Activate DAO Package <ArrowUpRight size={16} />
             </button>
-            <button className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[#FFB51D]/30 bg-[#FFB51D]/5 py-3 text-[13px] font-semibold text-[#FFB51D] hover:bg-[#FFB51D]/10 transition-all">
-              <Info size={15} /> Learn More About DAO
-            </button>
           </div>
         </div>
+        )}
       </SectionCard>
 
-      {/* Deductions Table */}
-      <SectionCard title="Withdrawal Deductions" subtitle="Fee structure applied on all withdrawals">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <p className="mb-3 text-[12px] font-semibold text-[#A3A3A3] uppercase tracking-wider">Standard Deductions (30%)</p>
-            <div className="overflow-hidden rounded-lg border border-[#222]">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#222] bg-[#0A0A0A]">
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-[#737373] uppercase">Type</th>
-                    <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-[#737373] uppercase">Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { type: "Admin Charges", rate: "5%", color: "text-red-400" },
-                    { type: "Reinvest", rate: "5%", color: "text-[#FFB51D]" },
-                    { type: "Ecosystem Deduction", rate: "20%", color: "text-purple-400" },
-                    { type: "Total", rate: "30%", color: "text-white", bold: true },
-                  ].map((row) => (
-                    <tr key={row.type} className="border-b border-[#222] last:border-0">
-                      <td className={`px-4 py-2.5 text-[12px] ${row.bold ? "font-bold text-white" : "text-[#A3A3A3]"}`}>{row.type}</td>
-                      <td className={`px-4 py-2.5 text-right text-[12px] font-bold ${row.color}`}>{row.rate}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* Stake Modal */}
+      {modalPkg && (
+        <div className="fixed inset-0 z-[160] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-[#FFB51D]/30 bg-[#121212] p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[#222] pb-3">
+              <div>
+                <h3 className="text-[18px] font-bold text-white">
+                  Stake in {modalPkg.isDAO ? "DAO Package" : `Package ${modalPkg.id + 1}`}
+                </h3>
+                <p className="text-[12px] text-[#A3A3A3]">USDT Balance: ${parseFloat(usdtBalance || "0").toFixed(2)}</p>
+              </div>
+              <button
+                onClick={() => setModalPkg(null)}
+                className="rounded-lg p-1.5 text-[#737373] hover:bg-white/10 hover:text-white"
+              >
+                <X size={18} />
+              </button>
             </div>
-          </div>
-          <div>
-            <p className="mb-3 text-[12px] font-semibold text-[#A3A3A3] uppercase tracking-wider">After 45 Days (10%)</p>
-            <div className="overflow-hidden rounded-lg border border-green-500/20">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#222] bg-[#0A0A0A]">
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-[#737373] uppercase">Type</th>
-                    <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-[#737373] uppercase">Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { type: "Admin Charges", rate: "5%", color: "text-red-400" },
-                    { type: "Reinvest", rate: "5%", color: "text-[#FFB51D]" },
-                    { type: "Total", rate: "10%", color: "text-green-400", bold: true },
-                  ].map((row) => (
-                    <tr key={row.type} className="border-b border-[#222] last:border-0">
-                      <td className={`px-4 py-2.5 text-[12px] ${row.bold ? "font-bold text-white" : "text-[#A3A3A3]"}`}>{row.type}</td>
-                      <td className={`px-4 py-2.5 text-right text-[12px] font-bold ${row.color}`}>{row.rate}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-[#222] bg-[#0A0A0A] p-3">
-              <Clock size={13} className="mt-0.5 shrink-0 text-[#FFB51D]" />
-              <p className="text-[11px] text-[#A3A3A3]">
-                Withdrawals after 45 days enjoy reduced fees. Max withdrawal: <strong className="text-white">$2,500</strong> with 24-hour cooling period.
-              </p>
+
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="text-[12px] text-[#A3A3A3] mb-1.5 block">Stake Amount (USDT)</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[14px] text-[#737373]">$</span>
+                  <input
+                    type="number"
+                    value={amountInput}
+                    onChange={(e) => setAmountInput(e.target.value)}
+                    min={modalPkg.minAmount}
+                    placeholder="0.00"
+                    className="h-11 w-full rounded-lg border border-[#333] bg-[#0A0A0A] pl-7 pr-16 text-[15px] font-bold text-white outline-none focus:border-[#FFB51D]"
+                  />
+                  <button
+                    onClick={() => setAmountInput(usdtBalance)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded bg-[#FFB51D]/10 px-2 py-1 text-[11px] font-bold text-[#FFB51D] hover:bg-[#FFB51D]/20"
+                  >
+                    MAX
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] text-[#737373]">
+                  Minimum: ${modalPkg.minAmount} USDT {modalPkg.isDAO && "· Multiples of $1,000"}
+                </p>
+              </div>
+
+              {errorMsg && (
+                <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-[12px] text-red-400">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModalPkg(null)}
+                  className="flex-1 rounded-xl border border-[#333] py-2.5 text-sm font-semibold text-[#A3A3A3] hover:bg-white/5"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStakeSubmit}
+                  disabled={isTransacting}
+                  className="flex-1 rounded-xl bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-2.5 text-sm font-bold text-black shadow hover:brightness-110 active:scale-95 disabled:opacity-50"
+                >
+                  {isTransacting ? "Confirming..." : "Approve & Stake"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </SectionCard>
+      )}
     </div>
   );
 }

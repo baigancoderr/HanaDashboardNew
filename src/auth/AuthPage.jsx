@@ -15,11 +15,7 @@ import {
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useDisconnect } from "wagmi";
 import logo from "../assets/logo.png";
-import {
-  isWalletRegistered,
-  referralStorageKey,
-  dummyRegistrationStorageKey,
-} from "../dashboard/referralStorage";
+import { useWeb3 } from "../context/Web3Context";
 import "./AuthPage.css";
 
 export default function AuthPage({ mode }) {
@@ -35,6 +31,12 @@ export default function AuthPage({ mode }) {
   const { open: modalOpen } = useAppKitState();
   const { disconnectAsync, isPending: disconnectPending } = useDisconnect();
   const navigate = useNavigate();
+  const {
+    register,
+    isRegistered,
+    isLoading,
+    isTransacting,
+  } = useWeb3();
 
   const handleCopyAddress = async () => {
     if (!address) return;
@@ -76,19 +78,11 @@ export default function AuthPage({ mode }) {
       return;
     }
 
-    if (isConnected && address) {
+    if (isConnected && address && !isLoading) {
       modalWasOpen.current = false;
       setPending(false);
       if (!isRegister) {
-        try {
-          navigate(isWalletRegistered(address) ? "/dashboard" : "/register");
-        } catch (storageError) {
-          setError(
-            storageError instanceof Error
-              ? `Could not check this wallet's registration: ${storageError.message}`
-              : "Could not check this wallet's registration.",
-          );
-        }
+        navigate(isRegistered ? "/dashboard" : "/register");
       }
       return;
     }
@@ -99,35 +93,19 @@ export default function AuthPage({ mode }) {
       modalWasOpen.current = false;
       setPending(false);
     }
-  }, [address, isConnected, isRegister, modalOpen, navigate, pending]);
+  }, [address, isConnected, isLoading, isRegistered, isRegister, modalOpen, navigate, pending]);
 
   useEffect(() => {
-    if (!isRegister || !isConnected || !address) return;
-
-    try {
-      if (isWalletRegistered(address)) navigate("/dashboard", { replace: true });
-    } catch (storageError) {
-      setError(
-        storageError instanceof Error
-          ? `Could not check this wallet's registration: ${storageError.message}`
-          : "Could not check this wallet's registration.",
-      );
+    if (isRegister && isConnected && address && !isLoading && isRegistered) {
+      navigate("/dashboard", { replace: true });
     }
-  }, [address, isConnected, isRegister, navigate]);
+  }, [address, isConnected, isLoading, isRegistered, isRegister, navigate]);
 
   const handleConnect = async () => {
     setError("");
     if (isConnected && address) {
-      if (!isRegister) {
-        try {
-          navigate(isWalletRegistered(address) ? "/dashboard" : "/register");
-        } catch (storageError) {
-          setError(
-            storageError instanceof Error
-              ? `Could not check this wallet's registration: ${storageError.message}`
-              : "Could not check this wallet's registration.",
-          );
-        }
+      if (!isRegister && !isLoading) {
+        navigate(isRegistered ? "/dashboard" : "/register");
       }
       return;
     }
@@ -145,7 +123,7 @@ export default function AuthPage({ mode }) {
     }
   };
 
-  const handleRegister = (event) => {
+  const handleRegister = async (event) => {
     event.preventDefault();
     setError("");
 
@@ -154,31 +132,27 @@ export default function AuthPage({ mode }) {
       return;
     }
 
-    let normalizedReferral;
-    try {
-      if (!isAddress(referral.trim())) {
+    let normalizedReferral = "0x0000000000000000000000000000000000000000";
+    const trimmed = referral.trim();
+    if (trimmed) {
+      try {
+        if (!isAddress(trimmed)) {
+          setError("Enter a valid EVM referral wallet address.");
+          return;
+        }
+        normalizedReferral = getAddress(trimmed);
+      } catch {
         setError("Enter a valid EVM referral wallet address.");
         return;
       }
-      normalizedReferral = getAddress(referral.trim());
-    } catch {
-      setError("Enter a valid EVM referral wallet address.");
-      return;
     }
 
-    try {
-      localStorage.setItem(referralStorageKey(address), normalizedReferral);
-      localStorage.setItem(dummyRegistrationStorageKey(address), "true");
-    } catch (storageError) {
-      setError(
-        storageError instanceof Error
-          ? `Could not save this demo registration: ${storageError.message}`
-          : "Could not save this demo registration.",
-      );
-      return;
+    const res = await register(normalizedReferral);
+    if (res.success) {
+      navigate("/dashboard");
+    } else if (res.error) {
+      setError(res.error);
     }
-
-    navigate("/dashboard");
   };
 
   return (
@@ -305,8 +279,8 @@ export default function AuthPage({ mode }) {
                 {error && <p className="hana-auth__error" role="alert">{error}</p>}
                 <div className="hana-auth__actions">
                   {isConnected ? (
-                    <button className="hana-auth__submit" type="submit">
-                      Create account <ArrowRight size={18} />
+                    <button className="hana-auth__submit" type="submit" disabled={isTransacting}>
+                      {isTransacting ? "Confirming on-chain..." : "Create account"} <ArrowRight size={18} />
                     </button>
                   ) : (
                     <button

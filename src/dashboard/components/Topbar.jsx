@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Search, User, ChevronDown, Menu, LogOut, Network, Wallet } from "lucide-react";
+import { Bell, Search, User, ChevronDown, Menu, LogOut, Network, Wallet, TrendingUp, ShieldCheck } from "lucide-react";
 import { useAppKit, useAppKitAccount } from "@reown/appkit/react";
 import { useNavigate } from "react-router-dom";
+import { useWeb3 } from "../../context/Web3Context";
 
 export default function Topbar({
   pageTitle,
@@ -14,6 +15,7 @@ export default function Topbar({
   const navigate = useNavigate();
   const { open } = useAppKit();
   const { address } = useAppKitAccount({ namespace: "eip155" });
+  const { hanaPrice, network } = useWeb3();
 
   useEffect(() => {
     const handlePointerDown = (event) => {
@@ -55,7 +57,7 @@ export default function Topbar({
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4">
-        <div className="relative hidden sm:block">
+        {/* <div className="relative hidden sm:block">
           <Search
             size={15}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-[#737373]"
@@ -65,15 +67,20 @@ export default function Topbar({
             placeholder="Search..."
             className="h-[38px] w-[180px] rounded-lg border border-[#222] bg-[#111] pl-9 pr-3 text-[13px] text-[#E5E5E5] placeholder-[#737373] outline-none focus:border-[#FFB51D]/40 transition-colors font-chakra-petch"
           />
-        </div>
+        </div> */}
 
-        {/* <div className="hidden items-center gap-1.5 rounded-lg border border-[#222] bg-[#111] px-3 py-1.5 sm:flex">
-          <TrendingUp size={13} className="text-green-400" />
-          <span className="font-chakra-petch text-[12px] font-semibold text-green-400">
-            $0.0845
+        <div className="hidden items-center gap-1.5 rounded-lg border border-[#FFB51D]/20 bg-[#FFB51D]/5 px-3 py-1.5 sm:flex">
+          <TrendingUp size={13} className="text-[#FFB51D]" />
+          <span className="font-chakra-petch text-[12px] font-semibold text-[#FFB51D]">
+            ${parseFloat(hanaPrice || "0").toFixed(4)}
           </span>
           <span className="font-chakra-petch text-[11px] text-[#737373]">HANA</span>
-        </div> */}
+        </div>
+
+        <div className="hidden items-center gap-1.5 rounded-lg border border-green-500/30 bg-green-500/10 px-2.5 py-1 text-[11px] font-semibold text-green-400 md:flex">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+          {network?.name || "BSC Testnet"}
+        </div>
 
         <button className="relative rounded-lg border border-[#222] bg-[#111] p-2 text-[#A3A3A3] hover:text-[#FFB51D] transition-colors">
           <Bell size={17} />

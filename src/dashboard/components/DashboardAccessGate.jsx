@@ -1,46 +1,41 @@
-import { useEffect, useState } from "react";
-import { useAppKitAccount } from "@reown/appkit/react";
+import { useAppKitAccount, useAppKitState } from "@reown/appkit/react";
 import { Navigate } from "react-router-dom";
-import { isWalletRegistered } from "../referralStorage";
+import { useWeb3 } from "../../context/Web3Context";
 
 export default function DashboardAccessGate({ children }) {
-  const { address, isConnected } = useAppKitAccount({ namespace: "eip155" });
-  const [registered, setRegistered] = useState(null);
-  const [error, setError] = useState("");
+  const { address, isConnected, status } = useAppKitAccount({ namespace: "eip155" });
+  const { initialized } = useAppKitState();
+  const { isRegistered, isLoading } = useWeb3();
 
-  useEffect(() => {
-    if (!isConnected || !address) {
-      setRegistered(false);
-      return;
-    }
-
-    try {
-      setRegistered(isWalletRegistered(address));
-      setError("");
-    } catch (storageError) {
-      setRegistered(null);
-      setError(
-        storageError instanceof Error
-          ? `Could not check this wallet's registration: ${storageError.message}`
-          : "Could not check this wallet's registration.",
-      );
-    }
-  }, [address, isConnected]);
+  if (!initialized || status === "connecting" || status === "reconnecting") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#08090C] text-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#FFB51D]/30 border-t-[#FFB51D]" />
+          <p className="text-sm font-medium text-[#A3A3A3]">Restoring wallet connection...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isConnected || !address) {
     return <Navigate to="/login" replace />;
   }
 
-  if (error) {
+  if (isLoading && !isRegistered) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-black p-6 text-center text-red-300">
-        {error}
+      <div className="flex min-h-screen items-center justify-center bg-[#08090C] text-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#FFB51D]/30 border-t-[#FFB51D]" />
+          <p className="text-sm font-medium text-[#A3A3A3]">Checking on-chain registration...</p>
+        </div>
       </div>
     );
   }
 
-  if (registered === null) return null;
-  if (!registered) return <Navigate to="/register" replace />;
+  if (!isRegistered) {
+    return <Navigate to="/register" replace />;
+  }
 
   return children;
 }
