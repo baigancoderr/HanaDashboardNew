@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useState } from "react";
 import { useAppKitAccount } from "@reown/appkit/react";
 import {
@@ -90,6 +91,30 @@ export default function ROIIncome() {
     : totalDirectEarnedUsdt > 0
     ? `$${totalDirectEarnedUsdt.toFixed(2)}`
     : "$0.00";
+=======
+import { TrendingUp, Clock, Coins, ArrowUpRight, Repeat, Sparkles } from "lucide-react";
+import StatCard from "../components/StatCard";
+import SectionCard from "../components/SectionCard";
+import DataUnavailable from "../components/DataUnavailable";
+import { useWeb3 } from "../../context/Web3Context";
+
+export default function ROIIncome() {
+  const {
+    totalPendingROI,
+    totalDirectIncome,
+    totalStaked,
+    userStakes,
+    packages,
+    claimAllROI,
+    isTransacting,
+  } = useWeb3();
+
+  const activeStakes = userStakes.filter((s) => s.active);
+  const totalClaimed = userStakes.reduce(
+    (acc, s) => acc + (parseFloat(s.totalClaimed) || 0),
+    0
+  );
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
 
   return (
     <div className="space-y-6">
@@ -97,86 +122,132 @@ export default function ROIIncome() {
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard
           icon={TrendingUp}
+<<<<<<< HEAD
           label="Total ROI Earned"
           value={totalRoiClaimedDisplay}
           sub="On-chain claimed ROI"
+=======
+          label="Total ROI Claimed"
+          value={`$${totalClaimed.toFixed(2)}`}
+          sub={`${activeStakes.length} active position(s)`}
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
           color="gold"
         />
         <StatCard
           icon={Coins}
           label="Direct Income"
+<<<<<<< HEAD
           value={totalDirectDisplay}
           sub={`${registeredReferrals.length} registered referral${
             registeredReferrals.length === 1 ? "" : "s"
           }`}
+=======
+          value={`$${parseFloat(totalDirectIncome || "0").toFixed(2)}`}
+          sub="5% Referral reward"
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
           color="blue"
         />
         <StatCard
           icon={Repeat}
+<<<<<<< HEAD
           label="Next Credit"
           value="12 Hours"
           sub="Twice daily ROI cycle"
+=======
+          label="Pending Claimable"
+          value={`$${parseFloat(totalPendingROI || "0").toFixed(4)}`}
+          sub="Ready to mint HANA"
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
           color="green"
         />
         <StatCard
           icon={Clock}
+<<<<<<< HEAD
           label="Valid Directs"
           value={user?.validDirects?.toString() || "0"}
           sub="Staked direct members"
+=======
+          label="Total Staked"
+          value={`$${parseFloat(totalStaked || "0").toLocaleString()}`}
+          sub="Generates 12h ROI"
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
           color="purple"
         />
       </div>
 
+      {parseFloat(totalPendingROI || "0") > 0 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-[#FFB51D]/40 bg-[#FFB51D]/10 p-4">
+          <div>
+            <p className="text-[15px] font-bold text-white">Unclaimed ROI Available</p>
+            <p className="text-[12px] text-[#A3A3A3]">
+              You have <strong className="text-[#FFB51D]">${totalPendingROI} USDT</strong> in pending returns ready to be claimed into HANA tokens.
+            </p>
+          </div>
+          <button
+            onClick={() => claimAllROI()}
+            disabled={isTransacting}
+            className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] px-5 py-2.5 text-xs font-bold text-black hover:brightness-110 active:scale-95 disabled:opacity-50"
+          >
+            <Sparkles size={14} />
+            {isTransacting ? "Claiming..." : "Claim All ROI"}
+          </button>
+        </div>
+      )}
+
       {/* ROI Structure */}
-      <SectionCard title="ROI Rate Structure" subtitle="Credits split and issued every 12 hours">
+      <SectionCard title="ROI Rate Structure" subtitle="Package rates read from the staking contract">
+        {packages.length === 0 ? (
+          <DataUnavailable>
+            Package rates are unavailable because the staking contract did not return package data.
+          </DataUnavailable>
+        ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { package: "$100", daily: "0.50%", per12h: "0.25%", daily$: "$0.50", cap: "$200" },
-            { package: "$300", daily: "0.60%", per12h: "0.30%", daily$: "$1.80", cap: "$600" },
-            { package: "$500", daily: "0.70%", per12h: "0.35%", daily$: "$3.50", cap: "$1,000" },
-            { package: "$1,000", daily: "1.00%", per12h: "0.50%", daily$: "$10.00", cap: "$2,000" },
-          ].map((row) => (
+          {packages.map((pkg) => {
+            const amount = Number(pkg.minAmount);
+            const dailyRate = pkg.dailyRateBps / 100;
+            const per12hRate = Math.floor(pkg.dailyRateBps / 2) / 100;
+            const dailyEarn = (amount * pkg.dailyRateBps) / 10000;
+            return (
             <div
-              key={row.package}
-              className={`rounded-xl border ${row.package === "$1,000" ? "border-[#FFB51D]/30 bg-[#FFB51D]/5" : "border-[#222] bg-[#111]"} p-4`}
+              key={pkg.id}
+              className="rounded-xl border border-[#222] bg-[#111] p-4"
             >
-              {row.package === "$1,000" && (
-                <div className="mb-2">
-                  <GoldBadge>Your Package</GoldBadge>
-                </div>
-              )}
-              <p className="text-[18px] font-bold text-white">{row.package}</p>
+              <p className="text-[18px] font-bold text-white">
+                {pkg.isDAO ? "DAO Package" : `Package ${pkg.id + 1}`} · ${amount.toLocaleString()} min.
+              </p>
               <div className="mt-3 space-y-2">
                 <div className="flex justify-between">
                   <span className="text-[11px] text-[#737373]">Daily Rate</span>
-                  <span className="text-[12px] font-bold text-[#FFB51D]">{row.daily}</span>
+                  <span className="text-[12px] font-bold text-[#FFB51D]">{dailyRate.toFixed(2)}%</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[11px] text-[#737373]">Per 12h</span>
-                  <span className="text-[12px] text-[#A3A3A3]">{row.per12h}</span>
+                  <span className="text-[12px] text-[#A3A3A3]">{per12hRate.toFixed(2)}%</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-[11px] text-[#737373]">Daily Earn</span>
-                  <span className="text-[12px] font-bold text-green-400">{row.daily$}</span>
+                  <span className="text-[11px] text-[#737373]">Daily ROI at minimum</span>
+                  <span className="text-[12px] font-bold text-green-400">${dailyEarn.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between border-t border-[#222] pt-2">
-                  <span className="text-[11px] text-[#737373]">2X Cap</span>
-                  <span className="text-[12px] font-bold text-white">{row.cap}</span>
+                  <span className="text-[11px] text-[#737373]">Position Cap</span>
+                  <span className="text-[12px] font-bold text-white">{pkg.capMultiplier}X (${(amount * pkg.capMultiplier).toLocaleString()} at minimum)</span>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
+        )}
 
         <div className="mt-4 rounded-lg border border-[#222] bg-[#0A0A0A] p-3">
           <p className="text-[12px] text-[#A3A3A3]">
-            <span className="font-semibold text-[#FFB51D]">Capping Rule:</span> 2X for Investors · 4X for Networkers · ROI, Direct & Level income counts toward capping.
-            Rank income and DAO income are <span className="text-green-400 font-semibold">excluded</span> from capping.
+            Each position stores its own cap. The contract does not expose a combined income cap or networker-specific multiplier.
           </p>
         </div>
       </SectionCard>
 
       {/* ROI History Chart */}
+<<<<<<< HEAD
       <SectionCard title="ROI Credit History" subtitle="Per-credit earnings (12h intervals)">
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={roiHistory} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
@@ -407,6 +478,12 @@ export default function ROIIncome() {
             )}
           </div>
         </div>
+=======
+      <SectionCard title="ROI Credit History" subtitle="Claim events are not indexed in this dashboard">
+        <DataUnavailable>
+          The contract exposes cumulative claimed ROI and current pending ROI, but this app does not yet fetch historical claim events.
+        </DataUnavailable>
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
       </SectionCard>
     </div>
   );

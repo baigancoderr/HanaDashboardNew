@@ -1,39 +1,146 @@
-import { Wallet, Clock, AlertTriangle, CheckCircle, ArrowDownRight, Info } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Wallet, Clock, AlertTriangle, CheckCircle, ArrowDownRight, AlertCircle } from "lucide-react";
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import GoldBadge from "../components/GoldBadge";
-
-const history = [
-  { id: "WD-001", amount: 100, fee: "30%", net: 70, status: "Completed", date: "10 Oct 2026", days: 5 },
-  { id: "WD-002", amount: 250, fee: "30%", net: 175, status: "Completed", date: "05 Oct 2026", days: 10 },
-  { id: "WD-003", amount: 500, fee: "10%", net: 450, status: "Completed", date: "15 Sep 2026", days: 55 },
-  { id: "WD-004", amount: 150, fee: "30%", net: 105, status: "Pending", date: "18 Oct 2026", days: 2 },
-];
-
-const statusColors = {
-  Completed: "border-green-500/30 bg-green-500/10 text-green-400",
-  Pending: "border-[#FFB51D]/30 bg-[#FFB51D]/10 text-[#FFB51D]",
-  Rejected: "border-red-500/30 bg-red-500/10 text-red-400",
-};
+import DataUnavailable from "../components/DataUnavailable";
+import { useWeb3 } from "../../context/Web3Context";
 
 export default function Withdrawals() {
-  const available = 284.50;
-  const reinvest = 128.45;
+  const {
+    totalWithdrawn,
+    lastWithdrawalTime,
+    firstStakeTime,
+    withdraw,
+    isTransacting,
+    address,
+    withdrawalConfig,
+  } = useWeb3();
+
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const coolingRemainingSecs = Math.max(
+    0,
+    (lastWithdrawalTime && withdrawalConfig
+      ? lastWithdrawalTime + withdrawalConfig.coolingPeriod
+      : 0) - nowSeconds
+  );
+
+  const coolingHours = Math.floor(coolingRemainingSecs / 3600);
+  const coolingMins = Math.floor((coolingRemainingSecs % 3600) / 60);
+
+  const isReducedFee = useMemo(() => {
+    if (!firstStakeTime || firstStakeTime === 0) return false;
+    return nowSeconds >= firstStakeTime + 45 * 86400;
+  }, [firstStakeTime, nowSeconds]);
+
+  const numAmount = parseFloat(withdrawAmount) || 0;
+  const standardFeeBps = withdrawalConfig
+    ? withdrawalConfig.adminFeeBps +
+      withdrawalConfig.swapFeeBps +
+      withdrawalConfig.ecosystemFeeBps
+    : 0;
+  const feePercent = withdrawalConfig
+    ? (isReducedFee ? 1000 : standardFeeBps) / 100
+    : 0;
+  const netAmount = Math.max(0, numAmount * (1 - feePercent / 100));
+  const maxWithdrawal = Number(withdrawalConfig?.maxWithdrawalPerDay || 0);
+  const standardFeePercent = standardFeeBps / 100;
+  const adminFeePercent = (withdrawalConfig?.adminFeeBps || 0) / 100;
+  const daoFeePercent = Math.max(0, standardFeePercent - adminFeePercent);
+
+  const handleWithdrawSubmit = async (e) => {
+    e.preventDefault();
+    if (numAmount <= 0) {
+      setErrorMsg("Please enter an amount greater than 0");
+      return;
+    }
+    if (!withdrawalConfig) {
+      setErrorMsg("Withdrawal rules could not be loaded from the staking contract.");
+      return;
+    }
+    if (numAmount > maxWithdrawal) {
+      setErrorMsg(`Maximum withdrawal per request is ${maxWithdrawal} USDT`);
+      return;
+    }
+    if (coolingRemainingSecs > 0) {
+      setErrorMsg(`Cooling period active. Please wait ${coolingHours}h ${coolingMins}m before withdrawing.`);
+      return;
+    }
+
+    setErrorMsg("");
+    const res = await withdraw(numAmount);
+    if (res.success) {
+      setWithdrawAmount("");
+    }
+  };
 
   return (
     <div className="space-y-6">
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        <StatCard icon={Wallet} label="Available Balance" value="$284.50" sub="Ready to withdraw" color="gold" />
-        <StatCard icon={ArrowDownRight} label="Total Withdrawn" value="$1,000" sub="Lifetime withdrawals" color="blue" />
-        <StatCard icon={Clock} label="Cooling Period" value="0h Left" sub="Ready for next withdrawal" color="green" />
-        <StatCard icon={Wallet} label="Reinvest Wallet" value="$128.45" sub="For $1,000 top-up only" color="purple" />
+        <StatCard
+          icon={ArrowDownRight}
+          label="Total Withdrawn"
+          value={`$${parseFloat(totalWithdrawn || "0").toLocaleString()}`}
+          sub="Lifetime on-chain"
+          color="blue"
+        />
+        <StatCard
+          icon={Clock}
+          label="Cooling Period"
+          value={
+            !withdrawalConfig
+              ? "Unavailable"
+              : coolingRemainingSecs > 0
+                ? `${coolingHours}h ${coolingMins}m`
+                : "Ready"
+          }
+          sub={
+            !withdrawalConfig
+              ? "Contract settings unavailable"
+              : coolingRemainingSecs > 0
+                ? "Contract cooling period active"
+                : "No lock active"
+          }
+          color={coolingRemainingSecs > 0 ? "gold" : "green"}
+        />
+        <StatCard
+          icon={CheckCircle}
+          label="Fee Tier"
+          value={withdrawalConfig ? `${feePercent.toFixed(2)}% Fee` : "Unavailable"}
+          sub={isReducedFee ? "Reduced fee after 45 days" : "Current contract fee"}
+          color={isReducedFee ? "green" : "purple"}
+        />
+        <StatCard
+          icon={Wallet}
+          label="Max Per Request"
+          value={withdrawalConfig ? `$${maxWithdrawal.toLocaleString()}` : "Unavailable"}
+          sub="Max per request"
+          color="gold"
+        />
       </div>
 
       {/* Withdrawal Form */}
-      <SectionCard title="Request Withdrawal" subtitle="Max $2,500 per request · 24h cooling period after each withdrawal">
+      <SectionCard
+        title="Request Withdrawal"
+        subtitle={
+          withdrawalConfig
+            ? `Max $${maxWithdrawal.toLocaleString()} per request · ${withdrawalConfig.coolingPeriod / 3600}h cooling period`
+            : "Withdrawal rules are loading or unavailable"
+        }
+      >
+        {!withdrawalConfig && (
+          <div className="mb-4">
+            <DataUnavailable>
+              Withdrawal controls remain disabled until the contract supplies its current limits and fee settings.
+            </DataUnavailable>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="space-y-4">
+          <form onSubmit={handleWithdrawSubmit} className="space-y-4">
             {/* Amount Input */}
             <div>
               <label className="mb-1.5 block text-[12px] font-medium text-[#A3A3A3]">
@@ -44,144 +151,162 @@ export default function Withdrawals() {
                 <input
                   type="number"
                   placeholder="0.00"
-                  max={2500}
+                  max={maxWithdrawal || undefined}
+                  step="0.01"
+                  value={withdrawAmount}
+                  onChange={(e) => {
+                    setWithdrawAmount(e.target.value);
+                    setErrorMsg("");
+                  }}
                   className="h-[46px] w-full rounded-lg border border-[#222] bg-[#111] pl-7 pr-16 text-[14px] text-white placeholder-[#737373] outline-none focus:border-[#FFB51D]/50 transition-colors"
                 />
-                <button className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[#FFB51D]/10 px-2 py-1 text-[11px] font-bold text-[#FFB51D] hover:bg-[#FFB51D]/20 transition-colors">
+                <button
+                  type="button"
+                  disabled={!withdrawalConfig}
+                  onClick={() => setWithdrawAmount(String(maxWithdrawal))}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[#FFB51D]/10 px-2 py-1 text-[11px] font-bold text-[#FFB51D] hover:bg-[#FFB51D]/20 transition-colors"
+                >
                   MAX
                 </button>
               </div>
-              <p className="mt-1 text-[11px] text-[#737373]">Available: <span className="text-[#FFB51D] font-semibold">${available}</span> · Max per request: <span className="text-white font-semibold">$2,500</span></p>
+              <p className="mt-1 text-[11px] text-[#737373]">
+                Max per request: <span className="text-white font-semibold">
+                  {withdrawalConfig ? `$${maxWithdrawal.toLocaleString()} USDT` : "Unavailable"}
+                </span>
+              </p>
             </div>
 
             {/* Wallet Address */}
             <div>
               <label className="mb-1.5 block text-[12px] font-medium text-[#A3A3A3]">
-                Destination Wallet (USDT BEP-20)
+                Destination Wallet (Connected Wallet)
               </label>
               <input
                 type="text"
-                placeholder="0x..."
-                className="h-[46px] w-full rounded-lg border border-[#222] bg-[#111] px-4 text-[13px] text-white placeholder-[#737373] outline-none focus:border-[#FFB51D]/50 transition-colors"
+                readOnly
+                value={address || "Please connect your wallet"}
+                className="h-[46px] w-full rounded-lg border border-[#222] bg-[#0A0A0A] px-4 text-[13px] text-[#A3A3A3] outline-none font-mono"
               />
             </div>
 
-            {/* Fee Estimator */}
-            <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-4 space-y-2">
-              <p className="text-[12px] font-semibold text-white">Fee Estimate</p>
-              <div className="flex justify-between">
-                <span className="text-[12px] text-[#A3A3A3]">Requested Amount</span>
-                <span className="text-[12px] text-white font-medium">$200.00</span>
+            {errorMsg && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-[12px] text-red-400">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{errorMsg}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-[12px] text-[#A3A3A3]">Admin Fee (5%)</span>
-                <span className="text-[12px] text-red-400">- $10.00</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[12px] text-[#A3A3A3]">Reinvest (5%)</span>
-                <span className="text-[12px] text-[#FFB51D]">- $10.00</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[12px] text-[#A3A3A3]">Ecosystem (20%)</span>
-                <span className="text-[12px] text-purple-400">- $40.00</span>
-              </div>
-              <div className="flex justify-between border-t border-[#222] pt-2">
-                <span className="text-[13px] font-semibold text-white">Net Received</span>
-                <span className="text-[15px] font-bold text-green-400">$140.00</span>
-              </div>
-            </div>
+            )}
 
-            <button className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black hover:brightness-110 transition-all">
-              <Wallet size={16} /> Request Withdrawal
+            {/* Fee Estimator */}
+            {withdrawalConfig ? (
+              <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-4 space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[12px] font-semibold text-white">Fee Breakdown</p>
+                  <GoldBadge>
+                    {`${feePercent.toFixed(2)}% ${isReducedFee ? "Reduced" : "Standard"} Fee`}
+                  </GoldBadge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[12px] text-[#A3A3A3]">Requested Amount</span>
+                  <span className="text-[12px] text-white font-medium">${numAmount.toFixed(2)}</span>
+                </div>
+                {isReducedFee ? (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-[12px] text-[#A3A3A3]">Treasury Fee (5%)</span>
+                      <span className="text-[12px] text-red-400">- ${(numAmount * 0.05).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[12px] text-[#A3A3A3]">Reinvest Fee (5%)</span>
+                      <span className="text-[12px] text-[#FFB51D]">- ${(numAmount * 0.05).toFixed(2)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-[12px] text-[#A3A3A3]">Treasury/Admin ({adminFeePercent.toFixed(2)}%)</span>
+                      <span className="text-[12px] text-red-400">- ${(numAmount * adminFeePercent / 100).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[12px] text-[#A3A3A3]">DAO Pool (remaining fee: {daoFeePercent.toFixed(2)}%)</span>
+                      <span className="text-[12px] text-[#FFB51D]">- ${(numAmount * daoFeePercent / 100).toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
+                <div className="flex justify-between border-t border-[#222] pt-2">
+                  <span className="text-[13px] font-semibold text-white">Net You Receive</span>
+                  <span className="text-[15px] font-bold text-green-400">${netAmount.toFixed(2)} USDT</span>
+                </div>
+              </div>
+            ) : (
+              <DataUnavailable>Fee and net amount estimates are hidden until contract settings load.</DataUnavailable>
+            )}
+
+            <button
+              type="submit"
+              disabled={!withdrawalConfig || isTransacting || coolingRemainingSecs > 0 || numAmount <= 0}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
+            >
+              <Wallet size={16} />
+              {isTransacting
+                ? "Processing Withdrawal..."
+                : coolingRemainingSecs > 0
+                ? `Cooling Active (${coolingHours}h ${coolingMins}m left)`
+                : "Confirm Withdrawal"}
             </button>
-          </div>
+          </form>
 
           {/* Rules Panel */}
           <div className="space-y-3">
             <p className="text-[12px] font-semibold text-[#A3A3A3] uppercase tracking-wider">Withdrawal Rules</p>
 
-            {[
-              {
-                icon: Clock,
-                color: "text-[#FFB51D]",
-                bg: "bg-[#FFB51D]/10",
-                title: "30% Fee (Default)",
-                desc: "Admin 5% + Reinvest 5% + Ecosystem 20% = 30% total deduction on all withdrawals.",
-              },
-              {
-                icon: CheckCircle,
-                color: "text-green-400",
-                bg: "bg-green-500/10",
-                title: "10% Fee (After 45 Days)",
-                desc: "Only Admin 5% + Reinvest 5%. Save 20% by waiting 45 days from last withdrawal.",
-              },
-              {
-                icon: AlertTriangle,
-                color: "text-red-400",
-                bg: "bg-red-500/10",
-                title: "$2,500 Max Per Request",
-                desc: "Maximum withdrawal limit per request. 24-hour cooling period applies after each withdrawal.",
-              },
-              {
-                icon: Wallet,
-                color: "text-purple-400",
-                bg: "bg-purple-500/10",
-                title: "Reinvest Wallet",
-                desc: "The 5% reinvest goes to your Reinvest Wallet. It can only be used to top up a $1,000 package ID.",
-              },
-              {
-                icon: Info,
-                color: "text-[#FFB51D]",
-                bg: "bg-[#FFB51D]/10",
-                title: "No P2P Transfers",
-                desc: "Internal HANA token transfers between members are not allowed in the system.",
-              },
-            ].map((item) => (
-              <div key={item.title} className="flex items-start gap-3 rounded-lg border border-[#222] bg-[#0A0A0A] p-3">
-                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${item.bg}`}>
-                  <item.icon size={14} className={item.color} />
-                </div>
-                <div>
-                  <p className="text-[12px] font-semibold text-white">{item.title}</p>
-                  <p className="mt-0.5 text-[11px] text-[#A3A3A3]">{item.desc}</p>
-                </div>
+            <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-3 flex gap-3 items-start">
+              <div className="h-7 w-7 rounded-lg bg-[#FFB51D]/10 text-[#FFB51D] flex items-center justify-center shrink-0">
+                <Clock size={16} />
               </div>
-            ))}
-          </div>
-        </div>
-      </SectionCard>
+              <div>
+                <p className="text-[13px] font-semibold text-white">
+                  {withdrawalConfig ? `${standardFeePercent.toFixed(2)}% Standard Fee` : "Fee rules unavailable"}
+                </p>
+                <p className="text-[12px] text-[#A3A3A3]">
+                  The contract sends its admin portion to treasury and the remaining standard fee to the DAO pool.
+                </p>
+              </div>
+            </div>
 
-      {/* History */}
-      <SectionCard title="Withdrawal History" subtitle="Your past withdrawal requests">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px]">
-            <thead>
-              <tr className="border-b border-[#222]">
-                {["TX ID", "Date", "Amount", "Fee", "Net", "Days Since Last", "Status"].map((h) => (
-                  <th key={h} className="pb-3 text-left text-[11px] font-semibold uppercase tracking-wider text-[#737373]">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((row, i) => (
-                <tr key={i} className="border-b border-[#222]">
-                  <td className="py-3 text-[12px] font-mono text-[#A3A3A3]">{row.id}</td>
-                  <td className="py-3 text-[12px] text-[#A3A3A3]">{row.date}</td>
-                  <td className="py-3 text-[13px] font-bold text-white">${row.amount}</td>
-                  <td className="py-3 text-[12px] font-semibold text-red-400">{row.fee}</td>
-                  <td className="py-3 text-[13px] font-bold text-green-400">${row.net}</td>
-                  <td className="py-3 text-[12px] text-[#A3A3A3]">{row.days} days</td>
-                  <td className="py-3">
-                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusColors[row.status]}`}>
-                      {row.status === "Completed" && <CheckCircle size={9} />}
-                      {row.status === "Pending" && <Clock size={9} />}
-                      {row.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-3 flex gap-3 items-start">
+              <div className="h-7 w-7 rounded-lg bg-green-500/10 text-green-400 flex items-center justify-center shrink-0">
+                <CheckCircle size={16} />
+              </div>
+              <div>
+                <p className="text-[13px] font-semibold text-white">
+                  10% Reduced Fee (After 45 Days)
+                </p>
+                <p className="text-[12px] text-[#A3A3A3]">
+                  {isReducedFee
+                    ? "Your account has qualified for the 10% fee reduction!"
+                    : `After 45 days, your fee is reduced by ${Math.max(0, standardFeePercent - 10).toFixed(2)} percentage points.`}
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-3 flex gap-3 items-start">
+              <div className="h-7 w-7 rounded-lg bg-red-500/10 text-red-400 flex items-center justify-center shrink-0">
+                <AlertTriangle size={16} />
+              </div>
+              <div>
+                <p className="text-[13px] font-semibold text-white">
+                  {withdrawalConfig
+                    ? `${withdrawalConfig.coolingPeriod / 3600}-Hour Cooling Period`
+                    : "Cooling Period Unavailable"}
+                </p>
+                <p className="text-[12px] text-[#A3A3A3]">
+                  {withdrawalConfig
+                    ? `After each withdrawal, wait ${withdrawalConfig.coolingPeriod / 3600} hours before the next one.`
+                    : "Cooling period is unavailable until contract settings load."}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </SectionCard>
     </div>

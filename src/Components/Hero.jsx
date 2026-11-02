@@ -2,7 +2,7 @@
 import React from "react";
 import { ArrowUpRight } from "lucide-react";
 import { Link } from "react-router-dom";
-import heroImg from "../assets/heroImg.gif";
+import heroImg from "../assets/heroImg.webp";
 import heroBackground from "../assets/herobg.png";
 import { Reveal, StaggerGroup, StaggerItem } from "./Motion";
 

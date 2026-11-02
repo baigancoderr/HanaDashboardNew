@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { useState } from "react";
 import { useAppKitAccount, useAppKitNetwork } from "@reown/appkit/react";
 import { bscTestnet } from "@reown/appkit/networks";
@@ -11,11 +12,33 @@ export default function DashboardAccessGate({ children }) {
   const { chainId, switchNetwork } = useAppKitNetwork();
   const [isSwitching, setIsSwitching] = useState(false);
   const { isRegistered, isLoading, isError } = useIsRegistered(address);
+=======
+import { useAppKitAccount, useAppKitState } from "@reown/appkit/react";
+import { Navigate } from "react-router-dom";
+import { useWeb3 } from "../../context/Web3Context";
+
+export default function DashboardAccessGate({ children }) {
+  const { address, isConnected, status } = useAppKitAccount({ namespace: "eip155" });
+  const { initialized } = useAppKitState();
+  const { isRegistered, isLoading } = useWeb3();
+
+  if (!initialized || status === "connecting" || status === "reconnecting") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#08090C] text-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#FFB51D]/30 border-t-[#FFB51D]" />
+          <p className="text-sm font-medium text-[#A3A3A3]">Restoring wallet connection...</p>
+        </div>
+      </div>
+    );
+  }
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
 
   if (!isConnected || !address) {
     return <Navigate to="/login" replace />;
   }
 
+<<<<<<< HEAD
   // Network check notification
   const isWrongNetwork = chainId && Number(chainId) !== BSC_TESTNET_CHAIN_ID;
 
@@ -37,11 +60,24 @@ export default function DashboardAccessGate({ children }) {
       <div className="flex min-h-screen flex-col items-center justify-center bg-black p-6 text-center text-white font-chakra-petch">
         <Loader2 className="mb-4 h-8 w-8 animate-spin text-[#FFB51D]" />
         <p className="text-sm text-neutral-400">Verifying account on BSC Testnet...</p>
+=======
+  if (isLoading && !isRegistered) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#08090C] text-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#FFB51D]/30 border-t-[#FFB51D]" />
+          <p className="text-sm font-medium text-[#A3A3A3]">Checking on-chain registration...</p>
+        </div>
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
       </div>
     );
   }
 
+<<<<<<< HEAD
   if (isError && !isRegistered) {
+=======
+  if (!isRegistered) {
+>>>>>>> a517f8edf55efb225c43ad309cdcbb680f4eadf4
     return <Navigate to="/register" replace />;
   }
 
