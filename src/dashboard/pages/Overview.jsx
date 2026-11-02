@@ -29,6 +29,12 @@ import {
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import GoldBadge from "../components/GoldBadge";
+import {
+  useUserData,
+  useUserStakes,
+  useUsdtBalance,
+  useHanaBalance,
+} from "../../contracts/hooks";
 
 const earningsData = [
   { day: "Day 1", roi: 5, direct: 2, level: 1 },
@@ -74,13 +80,17 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function Overview() {
   const [toast, setToast] = useState("");
   const { address } = useAppKitAccount({ namespace: "eip155" });
+  const { user } = useUserData(address);
+  const { stakes } = useUserStakes(address);
+  const { balanceFormatted: usdtBalance } = useUsdtBalance(address);
+  const { balanceFormatted: hanaBalance } = useHanaBalance(address);
+
   const referralLink = address
-    ? `${window.location.origin}/?ref=${encodeURIComponent(address)}`
+    ? `${window.location.origin}/register?ref=${encodeURIComponent(address)}`
     : "";
 
   useEffect(() => {
     if (!toast) return undefined;
-
     const timeoutId = window.setTimeout(() => setToast(""), 2500);
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
@@ -90,7 +100,6 @@ export default function Overview() {
       setToast("Connect a wallet to create your referral link");
       return;
     }
-
     try {
       await navigator.clipboard.writeText(referralLink);
       setToast("Referral link copied");
@@ -100,8 +109,13 @@ export default function Overview() {
     }
   };
 
+  const totalStaked = parseFloat(user?.totalStakedFormatted || 0);
+  const totalClaimed = parseFloat(user?.totalROIClaimedFormatted || 0);
+  const directIncome = parseFloat(user?.totalDirectFormatted || 0);
+  const levelIncome = parseFloat(user?.totalLevelFormatted || 0);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-chakra-petch">
       {toast && (
         <div
           className="fixed right-5 top-5 z-[120] flex items-center gap-2 rounded-lg border border-[#FFB51D]/40 bg-[#15120A] px-4 py-3 text-sm font-semibold text-[#F8E096] shadow-[0_8px_30px_rgba(0,0,0,0.5),0_0_18px_rgba(255,181,29,0.12)]"
@@ -119,53 +133,47 @@ export default function Overview() {
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
-              <GoldBadge>🌟 Genesis Rank</GoldBadge>
-              <GoldBadge>Active</GoldBadge>
+              <GoldBadge>{user?.isLeader ? "👑 Leader" : "🌟 Member"}</GoldBadge>
+              <GoldBadge>{user?.isDAO ? "DAO Member" : "Standard"}</GoldBadge>
             </div>
             <h2 className="mt-2 text-[20px] sm:text-[24px] font-bold text-white">
               Welcome back, <span className="gold-gradient-text">Hana Member</span>
             </h2>
             <p className="mt-1 text-[13px] text-[#A3A3A3]">
-              ID: #H10042 · Package: $1,000 · Joined 14 days ago
+              Active Positions: {stakes?.length || 0} · Network: BSC Testnet (Chain 97)
             </p>
             <div className="mt-3 space-y-2">
-              {/* <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[13px] text-[#A3A3A3]">Your wallet:</span>
-                <code className="break-all rounded-md border border-[#FFB51D]/20 bg-black/40 px-2.5 py-1 font-mono text-xs font-semibold text-[#F8E096]">
-                  {address || "Connect wallet to view address"}
-                </code>
-              </div> */}
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[13px] text-[#A3A3A3]">Referral link:</span>
                 <code className="min-w-0 break-all rounded-md border border-[#FFB51D]/10 bg-black/40 px-2.5 py-1 font-mono text-xs text-[#F8E096]">
                   {referralLink || "Connect wallet to create a referral link"}
                 </code>
-              <button
-                className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-[#FFB51D]/10 active:scale-95 ${
-                  toast === "Referral link copied"
-                    ? "border-[#FFB51D]/60 bg-[#FFB51D]/10 text-[#F8E096] shadow-[0_0_12px_rgba(255,181,29,0.2)]"
-                    : "border-[#FFB51D]/30 text-[#FFB51D]"
-                }`}
-                onClick={copyReferralLink}
-                type="button"
-              >
-                {toast === "Referral link copied" ? (
-                  <Check className="animate-[bounce_0.5s_ease-out]" size={13} />
-                ) : (
-                  <Copy size={13} />
-                )}
-                {toast === "Referral link copied" ? "Copied!" : "Copy link"}
-              </button>
+                <button
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-[#FFB51D]/10 active:scale-95 ${
+                    toast === "Referral link copied"
+                      ? "border-[#FFB51D]/60 bg-[#FFB51D]/10 text-[#F8E096] shadow-[0_0_12px_rgba(255,181,29,0.2)]"
+                      : "border-[#FFB51D]/30 text-[#FFB51D]"
+                  }`}
+                  onClick={copyReferralLink}
+                  type="button"
+                >
+                  {toast === "Referral link copied" ? (
+                    <Check className="animate-[bounce_0.5s_ease-out]" size={13} />
+                  ) : (
+                    <Copy size={13} />
+                  )}
+                  {toast === "Referral link copied" ? "Copied!" : "Copy link"}
+                </button>
               </div>
             </div>
           </div>
           <div className="flex flex-col items-start gap-2 sm:items-end">
             <div className="flex items-center gap-2 rounded-lg border border-[#222] bg-[#0A0A0A] px-4 py-2">
               <Clock size={14} className="text-[#FFB51D]" />
-              <span className="text-[12px] text-[#A3A3A3]">Next Credit in:</span>
-              <span className="text-[14px] font-bold text-[#FFB51D]">04:32:18</span>
+              <span className="text-[12px] text-[#A3A3A3]">Credit Interval:</span>
+              <span className="text-[14px] font-bold text-[#FFB51D]">Every 12h</span>
             </div>
-            <p className="text-[11px] text-[#737373]">Credits every 12 hours</p>
+            <p className="text-[11px] text-[#737373]">ROI split in 2 equal halves</p>
           </div>
         </div>
       </div>
@@ -174,31 +182,30 @@ export default function Overview() {
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard
           icon={Wallet}
-          label="Total Balance"
-          value="$1,284.50"
-          sub="Reinvest: $128.45"
+          label="USDT Balance"
+          value={`$${usdtBalance}`}
+          sub="Wallet balance"
           color="gold"
-          trend={{ up: true, value: "+1.0% today" }}
         />
         <StatCard
-          icon={TrendingUp}
-          label="Total Earned"
-          value="$284.50"
-          sub="Of $2,000 cap"
+          icon={Coins}
+          label="HANA Balance"
+          value={`${hanaBalance}`}
+          sub="Tokens allotted"
           color="blue"
         />
         <StatCard
-          icon={Users}
-          label="Direct Referrals"
-          value="6"
-          sub="Level 1 opened"
+          icon={Shield}
+          label="Total Staked"
+          value={`$${totalStaked.toLocaleString()}`}
+          sub={`${stakes?.length || 0} active position${stakes?.length === 1 ? "" : "s"}`}
           color="green"
         />
         <StatCard
-          icon={Award}
-          label="Current Rank"
-          value="Genesis"
-          sub="Next: Accelerator"
+          icon={TrendingUp}
+          label="Total ROI Claimed"
+          value={`$${totalClaimed.toLocaleString()}`}
+          sub="Direct contract earnings"
           color="purple"
         />
       </div>
@@ -206,32 +213,32 @@ export default function Overview() {
       {/* Second row stats */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard
-          icon={Coins}
-          label="ROI Earned"
-          value="$140.00"
-          sub="1.00%/day (12h split)"
+          icon={Users}
+          label="Valid Directs"
+          value={user?.validDirects?.toString() || "0"}
+          sub="Level qualified members"
           color="gold"
         />
         <StatCard
           icon={Users}
           label="Direct Income"
-          value="$75.00"
-          sub="5% on staking"
+          value={`$${directIncome.toLocaleString()}`}
+          sub="5% direct referral"
           color="blue"
         />
         <StatCard
           icon={Zap}
           label="Level Income"
-          value="$45.50"
-          sub="10 levels active"
+          value={`$${levelIncome.toLocaleString()}`}
+          sub="Downline ROI matching"
           color="green"
         />
         <StatCard
-          icon={Flame}
-          label="Tokens Burned"
-          value="12,450"
-          sub="HANA this month"
-          color="red"
+          icon={Award}
+          label="DAO Earnings"
+          value={`$${parseFloat(user?.totalDAOFormatted || 0).toLocaleString()}`}
+          sub="Weekly pool share"
+          color="purple"
         />
       </div>
 
@@ -240,7 +247,7 @@ export default function Overview() {
         {/* Earnings Chart */}
         <SectionCard
           title="Earnings Overview"
-          subtitle="Last 14 days performance"
+          subtitle="Performance tracking"
           className="lg:col-span-2"
         >
           <ResponsiveContainer width="100%" height={220}>
@@ -275,19 +282,19 @@ export default function Overview() {
           <div className="min-w-0">
             <ResponsiveContainer width="100%" height={190}>
               <PieChart>
-              <Pie
-                data={incomeBreakdown}
-                cx="50%"
-                cy="50%"
-                innerRadius="48%"
-                outerRadius="70%"
-                paddingAngle={4}
-                dataKey="value"
-              >
-                {incomeBreakdown.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
-                ))}
-              </Pie>
+                <Pie
+                  data={incomeBreakdown}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius="48%"
+                  outerRadius="70%"
+                  paddingAngle={4}
+                  dataKey="value"
+                >
+                  {incomeBreakdown.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
+                  ))}
+                </Pie>
               </PieChart>
             </ResponsiveContainer>
             <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
@@ -306,100 +313,13 @@ export default function Overview() {
         </SectionCard>
       </div>
 
-      {/* Bottom Row */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Recent Activity */}
-        <SectionCard title="Recent Activity" subtitle="Your latest transactions">
-          <div className="space-y-3">
-            {recentActivity.map((item, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between rounded-lg border border-[#222] bg-[#0A0A0A] px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#111]">
-                    <item.icon size={15} className={item.color} />
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-white">{item.type}</p>
-                    <p className="text-[11px] text-[#737373]">{item.time}</p>
-                  </div>
-                </div>
-                <span className={`text-[13px] font-bold ${item.amount.startsWith("+") ? "text-green-400" : "text-red-400"}`}>
-                  {item.amount}
-                </span>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-
-        {/* Progress & Caps */}
-        <SectionCard title="Capping Progress" subtitle="Income limits tracking">
-          <div className="space-y-4">
-            {/* Main Package Cap */}
-            <div>
-              <div className="flex justify-between mb-1.5">
-                <span className="text-[12px] text-[#A3A3A3]">Package ROI Cap (2X)</span>
-                <span className="text-[12px] font-semibold text-[#FFB51D]">$284 / $2,000</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-[#222] overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-[#FFE28A] to-[#FFB51D]" style={{ width: "14.2%" }} />
-              </div>
-              <p className="mt-1 text-[11px] text-[#737373]">14.2% of 2X cap used</p>
-            </div>
-
-            {/* Direct Income Cap */}
-            <div>
-              <div className="flex justify-between mb-1.5">
-                <span className="text-[12px] text-[#A3A3A3]">Level Income Cap (4X)</span>
-                <span className="text-[12px] font-semibold text-[#FFB51D]">$45 / $4,000</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-[#222] overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-neutral-400 to-white" style={{ width: "1.1%" }} />
-              </div>
-              <p className="mt-1 text-[11px] text-[#737373]">1.1% of 4X cap used</p>
-            </div>
-
-            {/* Withdrawal Limit */}
-            <div>
-              <div className="flex justify-between mb-1.5">
-                <span className="text-[12px] text-[#A3A3A3]">Daily Withdrawal Limit</span>
-                <span className="text-[12px] font-semibold text-green-400">$0 / $2,500</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-[#222] overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-green-400 to-emerald-500" style={{ width: "0%" }} />
-              </div>
-              <p className="mt-1 text-[11px] text-[#737373]">Max $2,500 per withdrawal</p>
-            </div>
-
-            {/* Rank Progress */}
-            <div className="mt-5 rounded-lg border border-[#FFB51D]/20 bg-[#FFB51D]/5 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[12px] text-[#A3A3A3]">Next Rank Progress</p>
-                  <p className="text-[14px] font-bold text-[#FFB51D]">Accelerator</p>
-                  <p className="text-[11px] text-[#737373]">Need $25,000 matching business</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[22px] font-bold text-white">$5,000</p>
-                  <p className="text-[11px] text-[#737373]">of $25,000</p>
-                </div>
-              </div>
-              <div className="mt-3 h-2 w-full rounded-full bg-[#222] overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-[#FFE28A] to-[#FFB51D]" style={{ width: "20%" }} />
-              </div>
-            </div>
-          </div>
-        </SectionCard>
-      </div>
-
       {/* Quick Links */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: "View Packages", icon: Shield, path: "/dashboard/packages", color: "from-[#FFE28A]/10 to-[#FFB51D]/5 border-[#FFB51D]/20 text-[#FFB51D]" },
-          { label: "Claim Rewards", icon: Award, path: "/dashboard/ranks", color: "from-purple-500/10 to-violet-500/5 border-purple-500/20 text-purple-400" },
-          { label: "DAO Program", icon: Users, path: "/dashboard/dao", color: "from-white/10 to-white/5 border-white/15 text-neutral-200" },
-          { label: "Withdraw", icon: Wallet, path: "/dashboard/withdrawals", color: "from-green-500/10 to-emerald-500/5 border-green-500/20 text-green-400" },
+          { label: "New Stake", icon: Shield, path: "/dashboard/staking", color: "from-[#FFE28A]/10 to-[#FFB51D]/5 border-[#FFB51D]/20 text-[#FFB51D]" },
+          { label: "View Packages", icon: Award, path: "/dashboard/packages", color: "from-purple-500/10 to-violet-500/5 border-purple-500/20 text-purple-400" },
+          { label: "Level Income", icon: Users, path: "/dashboard/levels", color: "from-white/10 to-white/5 border-white/15 text-neutral-200" },
+          { label: "Withdraw Tokens", icon: Wallet, path: "/dashboard/withdrawals", color: "from-green-500/10 to-emerald-500/5 border-green-500/20 text-green-400" },
         ].map((item) => (
           <a
             key={item.label}

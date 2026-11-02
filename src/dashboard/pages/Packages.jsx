@@ -1,19 +1,25 @@
-import { Shield, CheckCircle, ArrowUpRight, Info, Clock } from "lucide-react";
+import { Shield, CheckCircle, ArrowUpRight, Info, Clock, Plus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useAppKitAccount } from "@reown/appkit/react";
 import SectionCard from "../components/SectionCard";
 import GoldBadge from "../components/GoldBadge";
+import { useUserData, useUserStakes } from "../../contracts/hooks";
+import { DEFAULT_PACKAGES } from "../../contracts/config";
 
 const packages = [
   {
+    id: 1,
     amount: 100,
     dailyRate: "0.50%",
     split: "0.25% + 0.25%",
     cap: "2X",
     capAmount: "$200",
     color: "blue",
-    label: "Starter",
+    label: "Bronze",
     features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible"],
   },
   {
+    id: 2,
     amount: 300,
     dailyRate: "0.60%",
     split: "0.30% + 0.30%",
@@ -24,6 +30,7 @@ const packages = [
     features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible"],
   },
   {
+    id: 3,
     amount: 500,
     dailyRate: "0.70%",
     split: "0.35% + 0.35%",
@@ -34,28 +41,18 @@ const packages = [
     features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible"],
   },
   {
+    id: 4,
     amount: 1000,
     dailyRate: "1.00%",
     split: "0.50% + 0.50%",
     cap: "2X",
     capAmount: "$2,000",
     color: "green",
-    label: "Elite",
+    label: "Platinum",
     popular: true,
     features: ["12-hour credit cycle", "2X capping", "5% direct referral", "Level income eligible", "Sub-IDs allowed (after 10 min)", "Reinvest wallet eligible"],
   },
 ];
-
-const daoPackage = {
-  amount: 5000,
-  dailyRate: "1.00%",
-  split: "0.50% + 0.50%",
-  cap: "3X",
-  capAmount: "$15,000",
-  daoIncentive: "5% weekly (DAO Pool)",
-  durationDays: 500,
-  leaderCap: "5X",
-};
 
 const colorMap = {
   blue: {
@@ -89,15 +86,25 @@ const colorMap = {
 };
 
 export default function Packages() {
+  const navigate = useNavigate();
+  const { address } = useAppKitAccount({ namespace: "eip155" });
+  const { user } = useUserData(address);
+  const { stakes } = useUserStakes(address);
+
+  const primaryStake = stakes && stakes.length > 0 ? stakes[0] : null;
+  const primaryPkg = primaryStake
+    ? DEFAULT_PACKAGES.find((p) => p.id === primaryStake.packageId) || DEFAULT_PACKAGES[0]
+    : null;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-chakra-petch">
       {/* Header Info */}
       <div className="rounded-xl border border-[#222] bg-[#111] p-4 flex flex-col sm:flex-row sm:items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#FFE28A] to-[#FFB51D]">
           <Shield size={18} className="text-black" />
         </div>
         <div>
-          <p className="text-[14px] font-semibold text-white">Staking Packages</p>
+          <p className="text-[14px] font-semibold text-white">Staking Packages · BSC Testnet</p>
           <p className="text-[12px] text-[#A3A3A3]">
             All packages divided and credited every 12 hours. No P2P transfers allowed internally. Capping: 2X for Investors, 4X for Networkers.
           </p>
@@ -106,35 +113,58 @@ export default function Packages() {
 
       {/* Current Package */}
       <SectionCard title="Your Active Package">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-lg border border-[#FFB51D]/20 bg-[#FFB51D]/5 p-4">
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#FFE28A] to-[#FFB51D] flex items-center justify-center">
-              <Shield size={22} className="text-black" />
+        {primaryStake ? (
+          <>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-lg border border-[#FFB51D]/20 bg-[#FFB51D]/5 p-4">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-[#FFE28A] to-[#FFB51D] flex items-center justify-center">
+                  <Shield size={22} className="text-black" />
+                </div>
+                <div>
+                  <p className="text-[16px] font-bold text-white">
+                    ${parseFloat(primaryStake.amountFormatted).toLocaleString()} {primaryPkg?.name} Package
+                  </p>
+                  <p className="text-[12px] text-[#A3A3A3]">
+                    Active · {primaryPkg?.dailyRate} daily · Credited every 12h
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <GoldBadge>Earning {primaryPkg?.dailyRate} Daily</GoldBadge>
+                <GoldBadge>{stakes.length} Active Position{stakes.length === 1 ? "" : "s"}</GoldBadge>
+              </div>
             </div>
-            <div>
-              <p className="text-[16px] font-bold text-white">$1,000 Elite Package</p>
-              <p className="text-[12px] text-[#A3A3A3]">Active · 1.00% daily · Credited every 12h</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <GoldBadge>Earning 1% Daily</GoldBadge>
-            <GoldBadge>14 days active</GoldBadge>
-          </div>
-        </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {[
-            { label: "Invested", value: "$1,000" },
-            { label: "Earned", value: "$140.00" },
-            { label: "Cap (2X)", value: "$2,000" },
-            { label: "Remaining", value: "$1,860" },
-          ].map((item) => (
-            <div key={item.label} className="rounded-lg border border-[#222] bg-[#0A0A0A] p-3 text-center">
-              <p className="text-[11px] text-[#737373]">{item.label}</p>
-              <p className="mt-1 text-[15px] font-bold text-white">{item.value}</p>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                { label: "Total Invested", value: `$${parseFloat(user?.totalStakedFormatted || 0).toLocaleString()}` },
+                { label: "Total Claimed", value: `$${parseFloat(user?.totalROIClaimedFormatted || 0).toLocaleString()}` },
+                { label: "2X Cap", value: `$${parseFloat(primaryStake.capFormatted).toLocaleString()}` },
+                { label: "Status", value: primaryStake.active ? "Active" : "Capped" },
+              ].map((item) => (
+                <div key={item.label} className="rounded-lg border border-[#222] bg-[#0A0A0A] p-3 text-center">
+                  <p className="text-[11px] text-[#737373]">{item.label}</p>
+                  <p className="mt-1 text-[15px] font-bold text-white">{item.value}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          </>
+        ) : (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-lg border border-dashed border-white/15 bg-white/[0.02] p-5">
+            <div>
+              <p className="text-[15px] font-bold text-white">No active package yet</p>
+              <p className="text-[12px] text-[#A3A3A3] mt-0.5">
+                Stake USDT in any of the available packages below to activate daily earnings.
+              </p>
+            </div>
+            <button
+              onClick={() => navigate("/dashboard/staking")}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] px-4 py-2 text-xs font-bold text-black hover:brightness-110"
+            >
+              <Plus size={14} /> Stake Now
+            </button>
+          </div>
+        )}
       </SectionCard>
 
       {/* Package Cards */}
@@ -193,7 +223,8 @@ export default function Packages() {
                 </ul>
 
                 <button
-                  className={`mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r ${c.btn} py-2.5 text-[13px] font-semibold ${pkg.color === "gold" ? "text-black" : "text-white"} transition-all hover:brightness-110`}
+                  onClick={() => navigate("/dashboard/staking")}
+                  className={`mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r ${c.btn} py-2.5 text-[13px] font-semibold ${pkg.color === "gold" ? "text-black" : "text-white"} transition-all hover:brightness-110 cursor-pointer`}
                 >
                   Stake Now <ArrowUpRight size={14} />
                 </button>
@@ -217,20 +248,20 @@ export default function Packages() {
                 </div>
                 <div>
                   <p className="text-[20px] font-bold text-white">$5,000 DAO Package</p>
-                  <GoldBadge>Limited: 300 Members</GoldBadge>
+                  <GoldBadge>Limited: 500 Members</GoldBadge>
                 </div>
               </div>
               <p className="mt-3 text-[12px] text-[#A3A3A3] leading-relaxed">
-                Exclusive DAO membership active for 500 days. Receive 1% daily (split 12h) up to 3X cap ($15,000). DAO Network income is NOT included in 3X calculation.
+                Exclusive DAO membership active on BSC Testnet. Receive 1% daily (split 12h) up to 2X cap ($10,000). DAO Network income is NOT included in capping calculation.
               </p>
             </div>
 
             <div className="space-y-3">
               {[
                 { label: "Daily Rate", value: "1.00%", color: "text-[#FFB51D]" },
-                { label: "Capping", value: "3X = $15,000", color: "text-green-400" },
-                { label: "Leader Cap", value: "5X (with network)", color: "text-purple-400" },
-                { label: "Duration", value: "500 Days", color: "text-[#FFB51D]" },
+                { label: "Capping", value: "2X = $10,000", color: "text-green-400" },
+                { label: "Leader Cap", value: "4X (with network)", color: "text-purple-400" },
+                { label: "Duration", value: "365 Days", color: "text-[#FFB51D]" },
               ].map((item) => (
                 <div key={item.label} className="flex justify-between rounded-lg border border-[#222] bg-[#0A0A0A] px-3 py-2">
                   <span className="text-[11px] text-[#737373]">{item.label}</span>
@@ -244,7 +275,7 @@ export default function Packages() {
                 { label: "DAO Pool Share", value: "5% Weekly", color: "text-[#FFB51D]" },
                 { label: "Pool Distribution", value: "Equally split", color: "text-green-400" },
                 { label: "Top-up", value: "Multiples of $1,000", color: "text-[#FFB51D]" },
-                { label: "Payout", value: "Until $15K cap", color: "text-purple-400" },
+                { label: "Payout", value: "Until 2X cap", color: "text-purple-400" },
               ].map((item) => (
                 <div key={item.label} className="flex justify-between rounded-lg border border-[#222] bg-[#0A0A0A] px-3 py-2">
                   <span className="text-[11px] text-[#737373]">{item.label}</span>
@@ -255,11 +286,11 @@ export default function Packages() {
           </div>
 
           <div className="relative mt-5 flex flex-col sm:flex-row gap-3">
-            <button className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black hover:brightness-110 transition-all">
+            <button
+              onClick={() => navigate("/dashboard/staking")}
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black hover:brightness-110 transition-all cursor-pointer"
+            >
               Activate DAO Package <ArrowUpRight size={16} />
-            </button>
-            <button className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[#FFB51D]/30 bg-[#FFB51D]/5 py-3 text-[13px] font-semibold text-[#FFB51D] hover:bg-[#FFB51D]/10 transition-all">
-              <Info size={15} /> Learn More About DAO
             </button>
           </div>
         </div>
@@ -281,7 +312,7 @@ export default function Packages() {
                 <tbody>
                   {[
                     { type: "Admin Charges", rate: "5%", color: "text-red-400" },
-                    { type: "Reinvest", rate: "5%", color: "text-[#FFB51D]" },
+                    { type: "Swap Fee", rate: "5%", color: "text-[#FFB51D]" },
                     { type: "Ecosystem Deduction", rate: "20%", color: "text-purple-400" },
                     { type: "Total", rate: "30%", color: "text-white", bold: true },
                   ].map((row) => (
@@ -295,34 +326,16 @@ export default function Packages() {
             </div>
           </div>
           <div>
-            <p className="mb-3 text-[12px] font-semibold text-[#A3A3A3] uppercase tracking-wider">After 45 Days (10%)</p>
-            <div className="overflow-hidden rounded-lg border border-green-500/20">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[#222] bg-[#0A0A0A]">
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-[#737373] uppercase">Type</th>
-                    <th className="px-4 py-2.5 text-right text-[11px] font-semibold text-[#737373] uppercase">Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { type: "Admin Charges", rate: "5%", color: "text-red-400" },
-                    { type: "Reinvest", rate: "5%", color: "text-[#FFB51D]" },
-                    { type: "Total", rate: "10%", color: "text-green-400", bold: true },
-                  ].map((row) => (
-                    <tr key={row.type} className="border-b border-[#222] last:border-0">
-                      <td className={`px-4 py-2.5 text-[12px] ${row.bold ? "font-bold text-white" : "text-[#A3A3A3]"}`}>{row.type}</td>
-                      <td className={`px-4 py-2.5 text-right text-[12px] font-bold ${row.color}`}>{row.rate}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="mt-3 flex items-start gap-2 rounded-lg border border-[#222] bg-[#0A0A0A] p-3">
-              <Clock size={13} className="mt-0.5 shrink-0 text-[#FFB51D]" />
-              <p className="text-[11px] text-[#A3A3A3]">
-                Withdrawals after 45 days enjoy reduced fees. Max withdrawal: <strong className="text-white">$2,500</strong> with 24-hour cooling period.
-              </p>
+            <p className="mb-3 text-[12px] font-semibold text-[#A3A3A3] uppercase tracking-wider">Cooling Period & Limits</p>
+            <div className="overflow-hidden rounded-lg border border-green-500/20 p-4 bg-[#0A0A0A]">
+              <div className="flex items-start gap-2">
+                <Clock size={16} className="mt-0.5 shrink-0 text-[#FFB51D]" />
+                <p className="text-[12px] text-[#A3A3A3]">
+                  Max withdrawal per transaction: <strong className="text-white">$2,500</strong>.<br />
+                  Cooling period between withdrawals: <strong className="text-white">24 hours</strong>.<br />
+                  Minimum claim/withdrawal: <strong className="text-white">$10.00</strong>.
+                </p>
+              </div>
             </div>
           </div>
         </div>

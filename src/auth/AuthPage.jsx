@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { useAppKit, useAppKitAccount, useAppKitState } from "@reown/appkit/react";
-import { isAddress, getAddress } from "viem";
+import {
+  useAppKit,
+  useAppKitAccount,
+  useAppKitState,
+  useDisconnect,
+  useAppKitNetwork,
+} from "@reown/appkit/react";
+import { bscTestnet } from "@reown/appkit/networks";
+import { isAddress, getAddress } from "ethers";
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,122 +18,112 @@ import {
   LogOut,
   ShieldCheck,
   Wallet,
+  ExternalLink,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { useDisconnect } from "wagmi";
 import logo from "../assets/logo.png";
 import {
-  isWalletRegistered,
   referralStorageKey,
   dummyRegistrationStorageKey,
 } from "../dashboard/referralStorage";
+import {
+  useIsRegistered,
+  useRegisterWallet,
+} from "../contracts/hooks";
+import {
+  BSC_TESTNET_CHAIN_ID,
+  getExplorerTxUrl,
+  ZERO_ADDRESS,
+} from "../contracts/config";
 import "./AuthPage.css";
 
 export default function AuthPage({ mode }) {
   const isRegister = mode === "register";
   const [searchParams] = useSearchParams();
   const [referral, setReferral] = useState(searchParams.get("ref") ?? "");
-  const [error, setError] = useState("");
+  const [localError, setLocalError] = useState("");
   const [pending, setPending] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [disconnectPending, setDisconnectPending] = useState(false);
+  const [switchPending, setSwitchPending] = useState(false);
   const modalWasOpen = useRef(false);
+
   const { open } = useAppKit();
   const { address, isConnected } = useAppKitAccount({ namespace: "eip155" });
   const { open: modalOpen } = useAppKitState();
-  const { disconnectAsync, isPending: disconnectPending } = useDisconnect();
+  const { disconnect } = useDisconnect();
+  const { chainId, switchNetwork } = useAppKitNetwork();
   const navigate = useNavigate();
+
+  // On-chain registration checks and register action
+  const {
+    isRegistered,
+    isLoading: isCheckingRegistration,
+    refetch: refetchRegistration,
+  } = useIsRegistered(address);
+
+  const {
+    register: executeRegister,
+    step: registerStep,
+    error: registerError,
+    txHash,
+  } = useRegisterWallet();
+
+  const isWrongNetwork = isConnected && Number(chainId) !== BSC_TESTNET_CHAIN_ID;
 
   const handleCopyAddress = async () => {
     if (!address) return;
-
     try {
       await navigator.clipboard.writeText(address);
       setCopied(true);
-      setError("");
+      setLocalError("");
       window.setTimeout(() => setCopied(false), 1800);
-    } catch (copyError) {
+    } catch {
       setCopied(false);
-      setError(
-        copyError instanceof Error
-          ? `Could not copy wallet address: ${copyError.message}`
-          : "Could not copy wallet address.",
-      );
     }
   };
 
   const handleDisconnect = async () => {
-    setError("");
+    setLocalError("");
     setPending(false);
     setCopied(false);
-
+    setDisconnectPending(true);
     try {
-      await disconnectAsync();
+      await disconnect();
     } catch (disconnectError) {
-      setError(
+      setLocalError(
         disconnectError instanceof Error
-          ? `Could not disconnect wallet: ${disconnectError.message}`
-          : "Could not disconnect wallet.",
+          ? disconnectError.message
+          : "Could not disconnect wallet."
       );
+    } finally {
+      setDisconnectPending(false);
     }
   };
 
-  useEffect(() => {
-    if (!pending) {
-      modalWasOpen.current = false;
-      return;
-    }
-
-    if (isConnected && address) {
-      modalWasOpen.current = false;
-      setPending(false);
-      if (!isRegister) {
-        try {
-          navigate(isWalletRegistered(address) ? "/dashboard" : "/register");
-        } catch (storageError) {
-          setError(
-            storageError instanceof Error
-              ? `Could not check this wallet's registration: ${storageError.message}`
-              : "Could not check this wallet's registration.",
-          );
-        }
-      }
-      return;
-    }
-
-    if (modalOpen) {
-      modalWasOpen.current = true;
-    } else if (modalWasOpen.current) {
-      modalWasOpen.current = false;
-      setPending(false);
-    }
-  }, [address, isConnected, isRegister, modalOpen, navigate, pending]);
-
-  useEffect(() => {
-    if (!isRegister || !isConnected || !address) return;
-
+  const handleSwitchNetwork = async () => {
+    setSwitchPending(true);
     try {
-      if (isWalletRegistered(address)) navigate("/dashboard", { replace: true });
-    } catch (storageError) {
-      setError(
-        storageError instanceof Error
-          ? `Could not check this wallet's registration: ${storageError.message}`
-          : "Could not check this wallet's registration.",
-      );
+      if (switchNetwork) {
+        await switchNetwork(bscTestnet);
+      }
+    } catch (err) {
+      console.warn("Could not switch network:", err);
+    } finally {
+      setSwitchPending(false);
     }
-  }, [address, isConnected, isRegister, navigate]);
+  };
 
   const handleConnect = async () => {
-    setError("");
+    setLocalError("");
     if (isConnected && address) {
       if (!isRegister) {
-        try {
-          navigate(isWalletRegistered(address) ? "/dashboard" : "/register");
-        } catch (storageError) {
-          setError(
-            storageError instanceof Error
-              ? `Could not check this wallet's registration: ${storageError.message}`
-              : "Could not check this wallet's registration.",
-          );
+        if (isRegistered) {
+          navigate("/dashboard");
+        } else {
+          navigate("/register");
         }
       }
       return;
@@ -137,49 +134,79 @@ export default function AuthPage({ mode }) {
       await open({ view: "Connect", namespace: "eip155" });
     } catch (connectError) {
       setPending(false);
-      setError(
+      setLocalError(
         connectError instanceof Error
           ? connectError.message
-          : "Could not open wallet connection.",
+          : "Could not open wallet connection."
       );
     }
   };
 
-  const handleRegister = (event) => {
+  // Keep track of AppKit modal open state
+  useEffect(() => {
+    if (!pending) {
+      modalWasOpen.current = false;
+      return;
+    }
+
+    if (isConnected && address) {
+      modalWasOpen.current = false;
+      setPending(false);
+      return;
+    }
+
+    if (modalOpen) {
+      modalWasOpen.current = true;
+    } else if (modalWasOpen.current) {
+      modalWasOpen.current = false;
+      setPending(false);
+    }
+  }, [address, isConnected, modalOpen, pending]);
+
+  // Handle on-chain registration submit
+  const handleRegister = async (event) => {
     event.preventDefault();
-    setError("");
+    setLocalError("");
 
     if (!isConnected || !address) {
-      setError("Connect your wallet before creating your account.");
+      setLocalError("Connect your wallet before creating your account.");
       return;
     }
 
-    let normalizedReferral;
-    try {
-      if (!isAddress(referral.trim())) {
-        setError("Enter a valid EVM referral wallet address.");
+    let finalReferrer = ZERO_ADDRESS;
+    if (referral.trim() !== "") {
+      try {
+        if (!isAddress(referral.trim())) {
+          setLocalError("Enter a valid EVM referral wallet address or leave blank.");
+          return;
+        }
+        finalReferrer = getAddress(referral.trim());
+        if (finalReferrer.toLowerCase() === address.toLowerCase()) {
+          setLocalError("You cannot refer your own wallet address.");
+          return;
+        }
+      } catch {
+        setLocalError("Enter a valid EVM referral wallet address.");
         return;
       }
-      normalizedReferral = getAddress(referral.trim());
-    } catch {
-      setError("Enter a valid EVM referral wallet address.");
-      return;
+    } else {
+      if (finalReferrer.toLowerCase() === address.toLowerCase()) {
+        finalReferrer = "0x0000000000000000000000000000000000000000";
+      }
     }
 
     try {
-      localStorage.setItem(referralStorageKey(address), normalizedReferral);
-      localStorage.setItem(dummyRegistrationStorageKey(address), "true");
-    } catch (storageError) {
-      setError(
-        storageError instanceof Error
-          ? `Could not save this demo registration: ${storageError.message}`
-          : "Could not save this demo registration.",
-      );
-      return;
+      await executeRegister(address, finalReferrer);
+      await refetchRegistration();
+      setTimeout(() => {
+        navigate("/dashboard");
+      }, 1200);
+    } catch (err) {
+      console.error(err);
     }
-
-    navigate("/dashboard");
   };
+
+  const activeError = localError || registerError;
 
   return (
     <main className="hana-auth">
@@ -192,7 +219,7 @@ export default function AuthPage({ mode }) {
           <div className="hana-auth__story-copy">
             <span className="hana-auth__eyebrow">
               <span className="hana-auth__eyebrow-dot" />
-              Your gateway to the HANA ecosystem
+              BSC Testnet · HANA Smart Contracts
             </span>
             <h1>
               {isRegister ? (
@@ -203,15 +230,15 @@ export default function AuthPage({ mode }) {
             </h1>
             <p>
               {isRegister
-                ? "Create your account with a secure wallet connection and start exploring a new era of decentralized participation."
-                : "Connect your wallet to securely access your HANA dashboard and ecosystem."}
+                ? "Create your on-chain account with a secure wallet connection to participate in HANA staking and decentralized rewards."
+                : "Connect your wallet to securely access your HANA dashboard and active staking positions."}
             </p>
           </div>
           <div className="hana-auth__trust">
             <div className="hana-auth__trust-icon"><ShieldCheck size={19} /></div>
             <div>
-              <strong>Wallet-secured access</strong>
-              <span>Your keys stay in your wallet. HANA never asks for your seed phrase.</span>
+              <strong>Verified Staking Contract</strong>
+              <span>Direct BSC Testnet smart contract registration. Zero custodial risk.</span>
             </div>
           </div>
         </section>
@@ -247,21 +274,32 @@ export default function AuthPage({ mode }) {
                 {isRegister ? <Wallet size={20} /> : <LockKeyhole size={20} />}
               </span>
               <div>
-                <h2 id="hana-auth-title">{isRegister ? "Join the HANA ecosystem" : "Sign in to HANA"}</h2>
-                <p>{isRegister ? "Get started in just a few steps." : "Your wallet is your secure login."}</p>
+                <h2 id="hana-auth-title">
+                  {isRegister ? "Join HANA Staking" : "Sign in to HANA"}
+                </h2>
+                <p>
+                  {isRegister
+                    ? "Register your wallet on the Staking contract."
+                    : "Your wallet is your secure decentralized ID."}
+                </p>
               </div>
             </div>
 
             {isRegister && (
               <div className="hana-auth__steps" aria-label="Registration steps">
-                <span className="is-complete"><CheckCircle2 size={15} /> Wallet</span>
+                <span className={isConnected ? "is-complete" : "is-current"}>
+                  <CheckCircle2 size={15} /> Wallet
+                </span>
                 <i />
-                <span className={isConnected ? "is-current" : ""}>Referral</span>
+                <span className={isConnected && !isRegistered ? "is-current" : isRegistered ? "is-complete" : ""}>
+                  Register
+                </span>
                 <i />
-                <span>Dashboard</span>
+                <span className={isRegistered ? "is-complete" : ""}>Dashboard</span>
               </div>
             )}
 
+            {/* Wallet Info Box */}
             <div className="hana-auth__wallet">
               <span className="hana-auth__wallet-mark"><Wallet size={18} /></span>
               <div className="hana-auth__wallet-info">
@@ -282,69 +320,188 @@ export default function AuthPage({ mode }) {
                     </button>
                   </div>
                 ) : (
-                  <span>Secure access with your Web3 wallet</span>
+                  <span>Secure Web3 connection (BSC Testnet)</span>
                 )}
               </div>
-              <span className={`hana-auth__status ${isConnected ? "is-connected" : ""}`} aria-label={isConnected ? "Connected" : "Not connected"} />
+              <span
+                className={`hana-auth__status ${isConnected ? "is-connected" : ""}`}
+                aria-label={isConnected ? "Connected" : "Not connected"}
+              />
             </div>
+
+            {/* Network Warning Banner */}
+            {isWrongNetwork && (
+              <div className="mb-4 flex items-center justify-between rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+                <div className="flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0 text-[#FFB51D]" />
+                  <span>Switch network to BSC Testnet (Chain ID 97)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSwitchNetwork}
+                  disabled={switchPending}
+                  className="rounded bg-[#FFB51D] px-2.5 py-1 text-[11px] font-bold text-black hover:brightness-110 disabled:opacity-50"
+                >
+                  {switchPending ? "Switching..." : "Switch"}
+                </button>
+              </div>
+            )}
+
+            {/* Registration State or Form */}
             {isRegister ? (
-              <form className="hana-auth__form" onSubmit={handleRegister}>
-                <label htmlFor="hana-referral">Referral wallet address</label>
-                <input
-                  autoComplete="off"
-                  id="hana-referral"
-                  onChange={(event) => {
-                    setReferral(event.target.value);
-                    setError("");
-                  }}
-                  placeholder="0x..."
-                  spellCheck="false"
-                  value={referral}
-                />
-                <span className="hana-auth__hint">Enter the EVM wallet address of the person who referred you.</span>
-                {error && <p className="hana-auth__error" role="alert">{error}</p>}
-                <div className="hana-auth__actions">
-                  {isConnected ? (
-                    <button className="hana-auth__submit" type="submit">
-                      Create account <ArrowRight size={18} />
-                    </button>
-                  ) : (
+              isConnected && isRegistered ? (
+                <div className="hana-auth__form">
+                  <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-center">
+                    <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
+                    <h3 className="text-base font-bold text-white">Wallet Already Registered!</h3>
+                    <p className="mt-1 text-xs text-neutral-300">
+                      This address is already registered in the HANA Staking contract.
+                    </p>
+                  </div>
+                  <div className="hana-auth__actions mt-4">
                     <button
                       className="hana-auth__submit"
-                      disabled={pending}
-                      onClick={handleConnect}
                       type="button"
+                      onClick={() => navigate("/dashboard")}
                     >
-                      {pending ? "Waiting for wallet..." : "Connect wallet"} <ArrowRight size={18} />
+                      Proceed to Dashboard <ArrowRight size={18} />
                     </button>
-                  )}
-                  {isConnected && (
-                    <button
-                      className="hana-auth__disconnect"
-                      disabled={disconnectPending}
-                      onClick={handleDisconnect}
-                      type="button"
-                    >
-                      <LogOut size={15} />
-                      {disconnectPending ? "Disconnecting..." : "Disconnect wallet"}
-                    </button>
-                  )}
+                  </div>
                 </div>
-              </form>
+              ) : (
+                <form className="hana-auth__form" onSubmit={handleRegister}>
+                  <label htmlFor="hana-referral">
+                    Referral wallet address <span className="text-xs text-neutral-400">(optional)</span>
+                  </label>
+                  <input
+                    autoComplete="off"
+                    id="hana-referral"
+                    onChange={(event) => {
+                      setReferral(event.target.value);
+                      setLocalError("");
+                    }}
+                    placeholder="0x... (leave empty if no referrer)"
+                    spellCheck="false"
+                    value={referral}
+                    disabled={registerStep === "submitting" || registerStep === "confirming"}
+                  />
+                  <span className="hana-auth__hint">
+                    Enter the wallet address of the member who referred you, or leave blank to register directly.
+                  </span>
+
+                  {/* Registering Status Steps */}
+                  {registerStep !== "idle" && registerStep !== "error" && (
+                    <div className="my-3 rounded-lg border border-[#FFB51D]/30 bg-[#FFB51D]/10 p-3 text-xs text-[#FFB51D] flex items-center gap-2">
+                      <Loader2 size={16} className="animate-spin shrink-0" />
+                      <span>
+                        {registerStep === "checking" && "Validating network and parameters..."}
+                        {registerStep === "submitting" && "Please confirm the transaction in your wallet..."}
+                        {registerStep === "confirming" && "Transaction submitted! Waiting for BSC Testnet block confirmation..."}
+                        {registerStep === "success" && "Registered successfully! Loading your dashboard..."}
+                      </span>
+                    </div>
+                  )}
+
+                  {txHash && (
+                    <a
+                      href={getExplorerTxUrl(txHash)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="my-2 inline-flex items-center gap-1.5 text-xs text-[#FFB51D] underline hover:brightness-110"
+                    >
+                      <span>View transaction on BSCScan</span>
+                      <ExternalLink size={12} />
+                    </a>
+                  )}
+
+                  {activeError && (
+                    <p className="hana-auth__error" role="alert">
+                      {activeError}
+                    </p>
+                  )}
+
+                  <div className="hana-auth__actions">
+                    {isConnected ? (
+                      <button
+                        className="hana-auth__submit"
+                        type="submit"
+                        disabled={
+                          registerStep === "submitting" ||
+                          registerStep === "confirming" ||
+                          isCheckingRegistration
+                        }
+                      >
+                        {registerStep === "submitting" || registerStep === "confirming" ? (
+                          <>
+                            <Loader2 size={18} className="animate-spin" /> Registering on BSC...
+                          </>
+                        ) : (
+                          <>
+                            Register On-Chain <ArrowRight size={18} />
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        className="hana-auth__submit"
+                        disabled={pending}
+                        onClick={handleConnect}
+                        type="button"
+                      >
+                        {pending ? "Waiting for wallet..." : "Connect wallet"} <ArrowRight size={18} />
+                      </button>
+                    )}
+
+                    {isConnected && (
+                      <button
+                        className="hana-auth__disconnect"
+                        disabled={disconnectPending}
+                        onClick={handleDisconnect}
+                        type="button"
+                      >
+                        <LogOut size={15} />
+                        {disconnectPending ? "Disconnecting..." : "Disconnect wallet"}
+                      </button>
+                    )}
+                  </div>
+                </form>
+              )
             ) : (
               <div className="hana-auth__form">
                 <p className="hana-auth__description">
-                  Continue with your preferred wallet. You’ll approve the connection securely in your wallet app.
+                  Connect your Web3 wallet to access your HANA staking account and positions on BSC Testnet.
                 </p>
-                {error && <p className="hana-auth__error" role="alert">{error}</p>}
+
+                {isConnected && !isCheckingRegistration && (
+                  <div className="my-3 rounded-lg border border-white/10 bg-white/5 p-3 text-xs">
+                    {isRegistered ? (
+                      <p className="text-green-400 flex items-center gap-1.5">
+                        <CheckCircle2 size={15} /> Account registered on Staking Contract
+                      </p>
+                    ) : (
+                      <p className="text-amber-400 flex items-center gap-1.5">
+                        <AlertCircle size={15} /> This wallet is not registered yet.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {activeError && <p className="hana-auth__error" role="alert">{activeError}</p>}
+
                 <div className="hana-auth__actions">
                   <button
                     className="hana-auth__submit"
-                    disabled={pending}
+                    disabled={pending || isCheckingRegistration}
                     onClick={handleConnect}
                     type="button"
                   >
-                    {pending ? "Waiting for wallet..." : isConnected ? "Continue to dashboard" : "Connect wallet"}
+                    {pending
+                      ? "Waiting for wallet..."
+                      : isConnected
+                      ? isRegistered
+                        ? "Enter Dashboard"
+                        : "Go to Register"
+                      : "Connect wallet"}
                     <ArrowRight size={18} />
                   </button>
                 </div>
@@ -353,7 +510,7 @@ export default function AuthPage({ mode }) {
 
             <div className="hana-auth__security">
               <ShieldCheck size={15} />
-              <span>Secure connection · No password required</span>
+              <span>BSC Testnet (Chain ID 97) · Non-Custodial</span>
             </div>
             <p className="hana-auth__switch">
               {isRegister ? "Already part of HANA?" : "New to HANA?"}{" "}

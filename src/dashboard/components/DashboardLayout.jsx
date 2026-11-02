@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useDisconnect } from "wagmi";
+import { useDisconnect } from "@reown/appkit/react";
 import Sidebar from "./Sidebar";
 import SideRays from "./SideRays";
 import Topbar from "./Topbar";
@@ -26,7 +26,7 @@ export default function DashboardLayout() {
   const [disconnectError, setDisconnectError] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
-  const { disconnectAsync } = useDisconnect();
+  const { disconnect } = useDisconnect();
   const mainRef = useRef(null);
   const title = pageTitles[location.pathname] || "Dashboard";
 
@@ -37,7 +37,9 @@ export default function DashboardLayout() {
   const handleLogout = async () => {
     setDisconnectError("");
     try {
-      await disconnectAsync();
+      if (disconnect) {
+        await disconnect();
+      }
       navigate("/");
     } catch (error) {
       setDisconnectError(

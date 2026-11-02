@@ -1,22 +1,20 @@
 import { createAppKit } from "@reown/appkit/react";
-import { bsc } from "@reown/appkit/networks";
-import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WagmiProvider } from "wagmi";
+import { bscTestnet, bsc } from "@reown/appkit/networks";
+import { EthersAdapter } from "@reown/appkit-adapter-ethers";
 
 const projectId = "11122997d03999ce33f0f85fb93ee6d7";
-const networks = [bsc];
-const wagmiAdapter = new WagmiAdapter({ networks, projectId });
-const queryClient = new QueryClient();
+const networks = [bscTestnet, bsc];
+const ethersAdapter = new EthersAdapter();
 
 createAppKit({
-  adapters: [wagmiAdapter],
+  adapters: [ethersAdapter],
   networks,
+  defaultNetwork: bscTestnet,
   projectId,
   metadata: {
     name: "HANA",
-    description: "HANA ecosystem",
-    url: window.location.origin,
+    description: "HANA Decentralized Ecosystem",
+    url: typeof window !== "undefined" ? window.location.origin : "https://hana.io",
   },
   features: {
     analytics: true,
@@ -24,11 +22,5 @@ createAppKit({
 });
 
 export default function WalletProvider({ children }) {
-  return (
-    <WagmiProvider config={wagmiAdapter.wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        {children}
-      </QueryClientProvider>
-    </WagmiProvider>
-  );
+  return children;
 }
