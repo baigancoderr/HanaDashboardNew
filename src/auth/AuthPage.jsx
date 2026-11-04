@@ -149,7 +149,7 @@ export default function AuthPage({ mode }) {
       return;
     }
 
-    if (isConnected && address && !isLoading) {
+    if (isConnected && address && !isCheckingRegistration) {
       modalWasOpen.current = false;
       setPending(false);
       return;

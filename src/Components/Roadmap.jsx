@@ -159,7 +159,7 @@ export default function Roadmap() {
   };
 
   return (
-    <section id="roadmap" className="relative mx-auto max-w-[1600px]  px-5 lg:px-10 isolate min-h-screen overflow-clip text-[#e8f0fb]">
+    <section id="roadmap" className="relative mx-auto max-w-[1600px] mb-1  md:mb-10  px-5 lg:px-10 isolate min-h-screen overflow-clip text-[#e8f0fb]">
       <video
         className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-100"
         src={roadmapVideo}
@@ -200,7 +200,7 @@ export default function Roadmap() {
           </StaggerItem>
         </StaggerGroup>
 
-        <div className="min-w-0 px-1 pb-10 md:hidden">
+        <div className="min-w-0 px-1 pb-6 md:hidden">
           <div
             ref={mobileSliderRef}
             onScroll={(event) => {

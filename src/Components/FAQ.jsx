@@ -37,7 +37,7 @@ export default function FAQ() {
 
   return (
     <section className=" overflow-hidden bg-black px-5 py-10 font-chakra-petch text-white sm:px-8 sm:py-12 lg:px-12 lg:py-16">
-      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 items-start gap-10 md:grid-cols-[1.15fr_0.85fr] lg:gap-10 xl:gap-12">
+      <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 items-start gap-6 md:grid-cols-[1.15fr_0.85fr] lg:gap-10 xl:gap-12">
 
         {/* LEFT: FAQ Accordion */}
         <div className="order-2 min-w-0 lg:order-1">

@@ -48,7 +48,7 @@ const teamMembers = [
 
 export default function Team() {
   return (
-    <section className="font-chakra-petch w-full overflow-hidden bg-black px-5 py-2 text-white sm:px-8 lg:px-10 lg:py-8">
+    <section id="team" className="font-chakra-petch w-full overflow-hidden bg-black px-5 py-2 text-white sm:px-8 lg:px-10 lg:py-8">
       <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-8 md:grid-cols-[minmax(0,1fr)_180px] md:gap-5 lg:grid-cols-[minmax(0,1fr)_250px] lg:gap-3">
 
         {/* Team Images */}

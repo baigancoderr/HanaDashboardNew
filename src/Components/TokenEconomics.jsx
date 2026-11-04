@@ -23,7 +23,7 @@ const economicsData = [
   {
     title: "SELL",
     description:
-      "100% Of Applicable Tokens Burned.\n5% / 10% Liquidity Allocation Pending Validation.",
+      "100% Of Applicable Tokens Burned.",
     image: sellImage,
   },
   {
@@ -263,7 +263,7 @@ export default function TokenEconomics() {
         </div>
 
         {/* BOTTOM INFORMATION CARDS */}
-        <StaggerGroup className="mt-8 hidden grid-cols-1 gap-3 sm:mt-15 sm:grid-cols-2 lg:grid lg:grid-cols-3 lg:gap-10">
+        {/* <StaggerGroup className="mt-8 hidden grid-cols-1 gap-3 sm:mt-15 sm:grid-cols-2 lg:grid lg:grid-cols-3 lg:gap-10">
           {bottomData.map((item) => (
             <StaggerItem
               key={item.title}
@@ -273,7 +273,7 @@ export default function TokenEconomics() {
               <BottomCard item={item} />
             </StaggerItem>
           ))}
-        </StaggerGroup>
+        </StaggerGroup> */}
       </div>
     </section>
   );

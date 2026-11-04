@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAppKitAccount, useAppKitNetwork } from "@reown/appkit/react";
 import { bscTestnet } from "@reown/appkit/networks";
 import { Navigate } from "react-router-dom";
@@ -10,7 +10,25 @@ export default function DashboardAccessGate({ children }) {
   const { address, isConnected } = useAppKitAccount({ namespace: "eip155" });
   const { chainId, switchNetwork } = useAppKitNetwork();
   const [isSwitching, setIsSwitching] = useState(false);
+  // Give AppKit a moment to hydrate before redirecting
+  const [isInitializing, setIsInitializing] = useState(true);
   const { isRegistered, isLoading, isError } = useIsRegistered(address);
+
+  useEffect(() => {
+    // After first render cycle, AppKit will have restored wallet state
+    const timer = setTimeout(() => setIsInitializing(false), 800);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Show loader while AppKit is hydrating
+  if (isInitializing) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-black p-6 text-center text-white font-chakra-petch">
+        <Loader2 className="mb-4 h-8 w-8 animate-spin text-[#FFB51D]" />
+        <p className="text-sm text-neutral-400">Loading HANA Dashboard...</p>
+      </div>
+    );
+  }
 
   if (!isConnected || !address) {
     return <Navigate to="/login" replace />;

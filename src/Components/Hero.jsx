@@ -100,14 +100,28 @@ const Hero = () => {
           <StaggerItem className="mt-6 max-w-[680px] rounded-[10px] bg-[linear-gradient(90deg,#8F5B12_0%,#DFA52E_25%,#FFF1A8_48%,#E7AD38_68%,#9D6415_100%)] p-px">
             <div className="rounded-[9px] bg-[#020814]/90 px-4 py-3">
               <p
-                className="bg-clip-text text-[15px] font-semibold leading-[1.8] text-transparent sm:text-[18px]"
-                style={{
-                  backgroundImage: "linear-gradient(90deg, #E7AD38 0%, #FFD98C 100%)",
-                  WebkitBackgroundClip: "text",
-                  WebkitTextFillColor: "transparent",
-                }}
+                className="text-[18px] md:text-[25px] font-semibold leading-[1.5]"
               >
-                Intelligence in Every Move. Stability in Every Cycle. HANA Only Rises.
+                <span
+                  className="bg-clip-text text-transparent"
+                  style={{
+                    backgroundImage: "linear-gradient(90deg, #FFFFFF 0%, #6E6E6E 100%)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                  }}
+                >
+                  Intelligence in Every Move. Stability in Every Cycle.
+                </span>{" "}
+                <span
+                  className="bg-clip-text text-transparent"
+                  style={{
+                    backgroundImage: "linear-gradient(90deg, #E7AD38 0%, #FFD98C 100%)",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                  }}
+                >
+                  HANA Only Rises.
+                </span>
               </p>
 
               <p className="mt-2 text-[15px] font-semibold leading-[1.8] text-white sm:text-[18px]">
@@ -132,7 +146,7 @@ const Hero = () => {
               href="#explore-ppt"
               className="inline-flex min-h-[50px] items-center justify-center rounded-[4px] border border-[#8F7130] px-[17px] py-2 text-[16px] font-medium text-[#E8EAF2] transition-all duration-300 hover:border-[#F4C34F] hover:bg-[#E9B52C]/10"
             >
-              Explore PPT
+              Explore Hana
             </StaggerItem>
           </StaggerGroup>
         </StaggerGroup>
