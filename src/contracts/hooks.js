@@ -215,19 +215,18 @@ export function useUserStakes(address) {
         provider
       );
 
-      // Fetch both stakes data and Staked events to match tx hashes
-      const currentBlock = await provider.getBlockNumber();
+      // Query block number safely
+      const currentBlock = await provider.getBlockNumber().catch(() => 0);
       const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
+      const toBlock = currentBlock > 0 ? currentBlock : fromBlock + 50000;
 
-      const [data, stakedEvents] = await Promise.all([
-        staking.getUserStakes(normalizedAddr),
-        fetchLogsInChunks(
-          staking,
-          staking.filters.Staked(normalizedAddr),
-          fromBlock,
-          currentBlock
-        ).catch(() => []),
-      ]);
+      // 1. Fetch on-chain Staked events to match tx hashes and for fallback
+      const stakedEvents = await fetchLogsInChunks(
+        staking,
+        staking.filters.Staked(normalizedAddr),
+        fromBlock,
+        toBlock
+      ).catch(() => []);
 
       const txMap = new Map();
       stakedEvents.forEach((ev) => {
@@ -235,26 +234,110 @@ export function useUserStakes(address) {
         txMap.set(idx, ev.transactionHash);
       });
 
-      const parsed = (data || []).map((st, index) => {
-        const txHash = txMap.get(index) || null;
-        return {
-          stakeIndex: index,
-          packageId: Number(st[0]),
-          amount: st[1],
-          amountFormatted: formatEther(st[1] || 0n),
-          roiBaseAmount: st[2],
-          roiBaseAmountFormatted: formatEther(st[2] || 0n),
-          startTime: Number(st[3]),
-          lastClaimTime: Number(st[4]),
-          totalClaimed: st[5],
-          totalClaimedFormatted: formatEther(st[5] || 0n),
-          cap: st[6],
-          capFormatted: formatEther(st[6] || 0n),
-          active: Boolean(st[7]),
-          txHash,
-          explorerUrl: txHash ? getExplorerTxUrl(txHash) : null,
-        };
-      });
+      // 2. Attempt contract getUserStakes view call
+      let rawStakes = [];
+      try {
+        rawStakes = await staking.getUserStakes(normalizedAddr);
+      } catch (err) {
+        console.warn("getUserStakes contract call failed, checking event fallback:", err);
+      }
+
+      let parsed = [];
+
+      if (rawStakes && rawStakes.length > 0) {
+        parsed = rawStakes.map((st, index) => {
+          const txHash = txMap.get(index) || null;
+          const packageId = Number(st.packageId ?? st[0] ?? 0);
+          const amount = st.amount ?? st[1] ?? 0n;
+          const pkg =
+            DEFAULT_PACKAGES.find((p) => p.id === packageId) ||
+            DEFAULT_PACKAGES[0];
+
+          let startTime, lastClaimTime, totalClaimed, cap, active, roiBaseAmount;
+          if (st.roiBaseAmount !== undefined) {
+            roiBaseAmount = st.roiBaseAmount;
+            startTime = Number(st.startTime ?? st[3] ?? 0);
+            lastClaimTime = Number(st.lastClaimTime ?? st[4] ?? 0);
+            totalClaimed = st.totalClaimed ?? st[5] ?? 0n;
+            cap = st.cap ?? st[6] ?? 0n;
+            active = Boolean(st.active ?? st[7]);
+          } else if (st[7] !== undefined) {
+            roiBaseAmount = st[2] ?? 0n;
+            startTime = Number(st[3] ?? 0);
+            lastClaimTime = Number(st[4] ?? 0);
+            totalClaimed = st[5] ?? 0n;
+            cap = st[6] ?? 0n;
+            active = Boolean(st[7]);
+          } else {
+            roiBaseAmount = amount;
+            startTime = Number(st.startTime ?? st[2] ?? 0);
+            lastClaimTime = Number(st.lastClaimTime ?? st[3] ?? 0);
+            totalClaimed = st.totalClaimed ?? st[4] ?? 0n;
+            cap = st.cap ?? st[5] ?? (amount * BigInt(pkg.capMultiplier || 2));
+            active =
+              st.active !== undefined
+                ? Boolean(st.active)
+                : st[6] !== undefined
+                ? Boolean(st[6])
+                : true;
+          }
+
+          return {
+            stakeIndex: index,
+            packageId,
+            packageName: pkg.name,
+            dailyRate: pkg.dailyRate,
+            amount,
+            amountFormatted: formatEther(amount),
+            amountNumber: Number(formatEther(amount)),
+            roiBaseAmount,
+            roiBaseAmountFormatted: formatEther(roiBaseAmount || 0n),
+            startTime,
+            lastClaimTime,
+            totalClaimed,
+            totalClaimedFormatted: formatEther(totalClaimed || 0n),
+            cap,
+            capFormatted: formatEther(cap || 0n),
+            active,
+            txHash,
+            explorerUrl: txHash ? getExplorerTxUrl(txHash) : null,
+          };
+        });
+      }
+
+      // If getUserStakes returned empty but verified Staked events exist for this wallet, reconstruct from logs!
+      if ((!parsed || parsed.length === 0) && stakedEvents && stakedEvents.length > 0) {
+        parsed = stakedEvents.map((ev, index) => {
+          const stakeIndex = Number(ev.args?.[3] ?? ev.args?.stakeIndex ?? index);
+          const packageId = Number(ev.args?.[1] ?? ev.args?.packageId ?? 0);
+          const amount = ev.args?.[2] ?? ev.args?.amount ?? 0n;
+          const pkg =
+            DEFAULT_PACKAGES.find((p) => p.id === packageId) ||
+            DEFAULT_PACKAGES[0];
+          const cap = amount * BigInt(pkg.capMultiplier || 2);
+
+          return {
+            stakeIndex,
+            packageId,
+            packageName: pkg.name,
+            dailyRate: pkg.dailyRate,
+            amount,
+            amountFormatted: formatEther(amount),
+            amountNumber: Number(formatEther(amount)),
+            roiBaseAmount: amount,
+            roiBaseAmountFormatted: formatEther(amount),
+            startTime: 0,
+            lastClaimTime: 0,
+            totalClaimed: 0n,
+            totalClaimedFormatted: "0.00",
+            cap,
+            capFormatted: formatEther(cap),
+            active: true,
+            txHash: ev.transactionHash,
+            explorerUrl: getExplorerTxUrl(ev.transactionHash),
+          };
+        });
+      }
 
       setStakes(parsed);
     } catch (err) {
