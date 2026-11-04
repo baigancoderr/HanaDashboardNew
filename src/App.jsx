@@ -19,6 +19,7 @@ import ContractAddress from './Components/ContractAddress'
 import JoinUs from './Components/JoinUs'
 import HanaProtocol from './Components/HanaProtocol'
 import VisionMission from './Components/VisionMision'
+import HanaFeatures from './Components/HanaFeatures'
 
 // Dashboard
 import DashboardLayout from './dashboard/components/DashboardLayout'
@@ -51,12 +52,13 @@ function LandingPage() {
         <SectionReveal><AboutUs /></SectionReveal>
         <SectionReveal><VisionMission /></SectionReveal>
         <SectionReveal><DSESection /></SectionReveal>
-        <SectionReveal><HanaStability /></SectionReveal>
-        <SectionReveal><DAOpartner /></SectionReveal>
+        {/* <SectionReveal><HanaStability /></SectionReveal> */}
+        {/* <SectionReveal><DAOpartner /></SectionReveal> */}
         <SectionReveal><TokenEconomics /></SectionReveal>
         <SectionReveal><Token /></SectionReveal>
         <SectionReveal><Tokonomics /></SectionReveal>
-        <SectionReveal><Ecosystem /></SectionReveal>
+        {/* <SectionReveal><Ecosystem /></SectionReveal> */}
+        <SectionReveal><HanaFeatures /></SectionReveal>
         <SectionReveal><Roadmap /></SectionReveal>
         <SectionReveal><Team /></SectionReveal>
         <SectionReveal><FAQ /></SectionReveal>

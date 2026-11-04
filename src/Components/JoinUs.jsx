@@ -6,6 +6,7 @@ import exploreImage from "../assets/join/explore.png";
 import growImage from "../assets/join/grow.png";
 import participateImage from "../assets/join/participate.png";
 import stakeImage from "../assets/join/stake.png";
+import joinHanaImage from "../assets/join/joinhana1.png";
 import { Reveal, StaggerGroup, StaggerItem } from "./Motion";
 
 const features = [
@@ -18,8 +19,9 @@ const features = [
 
 export default function JoinUs() {
   return (
-    <section className=" overflow-hidden mb-10 bg-black px-5 py-5 text-white sm:px-8 lg:px-12">
-      <div className="mx-auto w-full max-w-[1400px]">
+    <section className=" overflow-hidden mb-4  md:mb-10 bg-black px-5 py-5 text-white sm:px-8 lg:px-12">
+      <div className="mx-auto flex w-full max-w-[1400px] flex-col items-center gap-4 lg:flex-row lg:justify-between">
+        <div className="relative z-10 w-full lg:max-w-[52%]">
 
         {/* Join Hana Label */}
        <Reveal as="span" className="inline-flex items-center bg-gradient-to-r from-[#F8E096] to-[#FFB01B] px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-black [clip-path:polygon(0_0,100%_0,100%_75%,88%_100%,0_100%)]">
@@ -27,8 +29,8 @@ export default function JoinUs() {
                    </Reveal>
 
         {/* Heading and Description */}
-        <div className="max-w-[760px]">
-          <Reveal as="h1" className="text-[25px] mt-6 unbounded font-bold leading-[1.2] tracking-[-1.5px] text-[#e8f0ff] sm:text-5xl md:text-[40px] lg:text-[58px] lg:tracking-[-0.01px]">
+        <div className="max-w-[720px]">
+          <Reveal as="h1" className="text-[25px] mt-6 unbounded font-bold leading-[1.2] tracking-[-1.5px] text-[#e8f0ff] sm:text-5xl md:text-[40px] lg:text-[52px] lg:tracking-[-0.01px]">
               Your Next Chapter in
                Decentralization.
           </Reveal>
@@ -104,9 +106,19 @@ export default function JoinUs() {
             </StaggerGroup>
           </StaggerGroup>
         </div>
+        </div>
+
+        <Reveal className="flex w-full justify-center lg:w-[48%] lg:justify-end">
+          <img
+            src={joinHanaImage}
+            alt="Join the HANA community"
+            loading="lazy"
+            className="h-auto w-full max-w-[650px] object-contain"
+          />
+        </Reveal>
 
         {/* Bottom Ecosystem */}
-        <Reveal className="mt-6 rounded-[22px] border border-amber-500/60 bg-gradient-to-b from-[#101010] to-[#050505] p-4 transition-shadow duration-500 hover:shadow-[0_0_30px_rgba(245,190,70,0.12)] sm:mt-14 sm:px-6 sm:py-5">
+        {/* <Reveal className="mt-6 rounded-[22px] border border-amber-500/60 bg-gradient-to-b from-[#101010] to-[#050505] p-4 transition-shadow duration-500 hover:shadow-[0_0_30px_rgba(245,190,70,0.12)] sm:mt-14 sm:px-6 sm:py-5">
           <StaggerGroup className="flex flex-nowrap gap-3 overflow-x-auto overscroll-x-contain pb-2 lg:grid lg:grid-cols-5 lg:gap-8 lg:overflow-visible lg:pb-0">
             {features.map((feature) => (
               <StaggerItem
@@ -132,7 +144,7 @@ export default function JoinUs() {
               </StaggerItem>
             ))}
           </StaggerGroup>
-        </Reveal>
+        </Reveal> */}
 
       </div>
     </section>
