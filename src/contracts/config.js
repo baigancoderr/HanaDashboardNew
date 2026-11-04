@@ -5,8 +5,8 @@ export const BSC_TESTNET_CHAIN_ID = 97;
 export const BSC_TESTNET_RPC = "https://bsc-testnet.publicnode.com";
 export const BSC_TESTNET_RPC_FALLBACK = "https://data-seed-prebsc-1-s1.binance.org:8545";
 
-// Approximate deployment block for staking contract 0x50E331A6984310465CB54c52CE5B91c7e54d4765
-export const CONTRACT_START_BLOCK = 140360000;
+// Deployment block for staking contract 0xdd3D1F695F922B1AAD4Ae36Ab6193E647e2F74da
+export const CONTRACT_START_BLOCK = 140760000;
 
 let _readOnlyProvider = null;
 export const getReadOnlyProvider = () => {
@@ -25,7 +25,7 @@ export const CONTRACT_ADDRESSES = {
   // USDT Token (Testnet - DUSDT)
   usdtToken: "0x544E83aC9Fa1D0e29E95eBBd1B35A4F2798D81Ea",
   // HANA Staking Contract (Testnet)
-  stakingContract: "0x50E331A6984310465CB54c52CE5B91c7e54d4765",
+  stakingContract: "0xdd3D1F695F922B1AAD4Ae36Ab6193E647e2F74da",
 };
 
 export const ZERO_ADDRESS = "0x42EC3cf99Bbc169C1d22c70339b5625A993CC033";

@@ -61,9 +61,9 @@ export const BSC_MAINNET = {
 // ======================== CONTRACT ADDRESSES ========================
 
 export const CONTRACTS_TESTNET = {
-  hanaToken: "0xD8c54b4b3fAE85b1Dfba1B868b1873C12FDd75EA",
+  hanaToken: "0xdF8Bb2Fb2329B17F8C3a8c6B2a97c3372Bd7fa16",
   usdt: "0x544E83aC9Fa1D0e29E95eBBd1B35A4F2798D81Ea",
-  stakingContract: "0x50E2dEF4501A1573122c2134F6c1343aB1C72e6E",
+  stakingContract: "0xdd3D1F695F922B1AAD4Ae36Ab6193E647e2F74da",
 };
 
 export const CONTRACTS_MAINNET = {

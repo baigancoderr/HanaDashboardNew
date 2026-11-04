@@ -1,5 +1,5 @@
 // HANA Token Contract ABI
-// Contract: 0xD8c54b4b3fAE85b1Dfba1B868b1873C12FDd75EA (BSC Testnet)
+// Contract: 0xdF8Bb2Fb2329B17F8C3a8c6B2a97c3372Bd7fa16 (BSC Testnet)
 // Source: HANA_Token.sol — ERC20Decimals, Burnable, StuckRecover, HANA
 
 export const HANA_TOKEN_ABI = [

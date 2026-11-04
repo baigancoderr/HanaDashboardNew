@@ -149,7 +149,7 @@ export default function AuthPage({ mode }) {
       return;
     }
 
-    if (isConnected && address && !isLoading) {
+    if (isConnected && address && !isCheckingRegistration) {
       modalWasOpen.current = false;
       setPending(false);
       return;
@@ -161,7 +161,7 @@ export default function AuthPage({ mode }) {
       modalWasOpen.current = false;
       setPending(false);
     }
-  }, [address, isConnected, modalOpen, pending]);
+  }, [address, isConnected, modalOpen, pending, isCheckingRegistration]);
 
   // Handle on-chain registration submit
   const handleRegister = async (event) => {
