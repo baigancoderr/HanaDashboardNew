@@ -1,10 +1,23 @@
 import { useState, useMemo } from "react";
-import { Wallet, Clock, AlertTriangle, CheckCircle, ArrowDownRight, AlertCircle } from "lucide-react";
+import {
+  Wallet,
+  Clock,
+  AlertTriangle,
+  CheckCircle,
+  ArrowDownRight,
+  AlertCircle,
+  Coins,
+  ExternalLink,
+  Loader2,
+} from "lucide-react";
+import { formatEther } from "ethers";
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import GoldBadge from "../components/GoldBadge";
 import DataUnavailable from "../components/DataUnavailable";
 import { useWeb3 } from "../../context/Web3Context";
+import { useUserData, useWithdrawHanaTokens } from "../../contracts/hooks";
+import { getExplorerTxUrl } from "../../contracts/config";
 
 export default function Withdrawals() {
   const {
@@ -19,6 +32,22 @@ export default function Withdrawals() {
 
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  const [hanaWithdrawAmount, setHanaWithdrawAmount] = useState("");
+  const [hanaWithdrawError, setHanaWithdrawError] = useState("");
+  const [hanaWithdrawTx, setHanaWithdrawTx] = useState("");
+  const { user, isLoading: isHanaBalanceLoading, refetch: refetchUser } =
+    useUserData(address);
+  const {
+    withdraw: withdrawHana,
+    isPending: isHanaWithdrawPending,
+  } = useWithdrawHanaTokens();
+  const withdrawableHana = user?.hanaBalance ?? 0n;
+  const withdrawableHanaFormatted = user?.hanaBalanceFormatted || "0";
+  const hanaAmountNumber = Number(hanaWithdrawAmount) || 0;
+  const displayedHanaBalance = Number(withdrawableHanaFormatted).toLocaleString(
+    "en-US",
+    { maximumFractionDigits: 4 }
+  );
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const coolingRemainingSecs = Math.max(
@@ -74,6 +103,32 @@ export default function Withdrawals() {
     const res = await withdraw(numAmount);
     if (res.success) {
       setWithdrawAmount("");
+    }
+  };
+
+  const handleHanaWithdrawSubmit = async (e) => {
+    e.preventDefault();
+    setHanaWithdrawError("");
+    setHanaWithdrawTx("");
+
+    if (!address) {
+      setHanaWithdrawError("Connect your wallet to withdraw HANA.");
+      return;
+    }
+    if (!hanaWithdrawAmount.trim() || hanaAmountNumber <= 0) {
+      setHanaWithdrawError("Enter a HANA amount greater than zero.");
+      return;
+    }
+
+    try {
+      const result = await withdrawHana(address, hanaWithdrawAmount);
+      if (result.success) {
+        setHanaWithdrawAmount("");
+        setHanaWithdrawTx(result.hash);
+        await refetchUser();
+      }
+    } catch (error) {
+      setHanaWithdrawError(error.message || "HANA withdrawal failed.");
     }
   };
 
@@ -243,7 +298,7 @@ export default function Withdrawals() {
 
             <button
               type="submit"
-              disabled={!withdrawalConfig || isTransacting || coolingRemainingSecs > 0 || numAmount <= 0}
+              disabled={!withdrawalConfig || isTransacting || isHanaWithdrawPending || coolingRemainingSecs > 0 || numAmount <= 0}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black hover:brightness-110 active:scale-95 transition-all disabled:opacity-50"
             >
               <Wallet size={16} />
@@ -306,6 +361,171 @@ export default function Withdrawals() {
                 </p>
               </div>
             </div>
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Withdraw HANA"
+        subtitle="Withdraw HANA credited to your staking-contract balance."
+        className="border-[#FFB51D]/20 bg-gradient-to-br from-[#17140D] via-[#111] to-[#0B0B0B]"
+      >
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <form onSubmit={handleHanaWithdrawSubmit} className="space-y-4">
+            <div className="rounded-xl border border-[#FFB51D]/20 bg-[#FFB51D]/[0.05] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wider text-[#A3A3A3]">
+                    Withdrawable HANA
+                  </p>
+                  <p className="mt-1 text-2xl font-bold text-[#FFCF61]">
+                    {!address
+                      ? "Connect wallet"
+                      : isHanaBalanceLoading
+                        ? "Loading..."
+                        : displayedHanaBalance}
+                    {address && (
+                      <span className="ml-2 text-sm font-semibold text-[#A3A3A3]">
+                        HANA
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#FFE28A] to-[#FFB51D] text-black">
+                  <Coins size={20} />
+                </div>
+              </div>
+              <p className="mt-2 break-all text-[10px] text-[#737373]">
+                Balance from the staking contract&apos;s users(address) record
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="hana-withdraw-amount"
+                className="mb-1.5 block text-[12px] font-medium text-[#A3A3A3]"
+              >
+                HANA Amount
+              </label>
+              <div className="relative">
+                <input
+                  id="hana-withdraw-amount"
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="any"
+                  placeholder="0.00"
+                  value={hanaWithdrawAmount}
+                  onChange={(e) => {
+                    setHanaWithdrawAmount(e.target.value);
+                    setHanaWithdrawError("");
+                    setHanaWithdrawTx("");
+                  }}
+                  disabled={!address || isHanaBalanceLoading || isHanaWithdrawPending || isTransacting}
+                  className="h-[46px] w-full rounded-lg border border-[#222] bg-[#111] px-4 pr-20 text-[14px] text-white placeholder-[#737373] outline-none transition-colors focus:border-[#FFB51D]/50 disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  disabled={
+                    !address ||
+                    isHanaBalanceLoading ||
+                    isHanaWithdrawPending ||
+                    isTransacting ||
+                    withdrawableHana <= 0n
+                  }
+                  onClick={() => {
+                    setHanaWithdrawAmount(formatEther(withdrawableHana));
+                    setHanaWithdrawError("");
+                    setHanaWithdrawTx("");
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[#FFB51D]/10 px-2 py-1 text-[11px] font-bold text-[#FFB51D] transition-colors hover:bg-[#FFB51D]/20 disabled:opacity-40"
+                >
+                  MAX
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-[#737373]">
+                Maximum available:{" "}
+                <span className="font-semibold text-white">
+                  {isHanaBalanceLoading
+                    ? "Loading..."
+                    : address
+                      ? `${withdrawableHanaFormatted} HANA`
+                      : "Connect wallet"}
+                </span>
+              </p>
+            </div>
+
+            {hanaWithdrawError && (
+              <div
+                className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-2.5 text-[12px] text-red-400"
+                role="alert"
+              >
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{hanaWithdrawError}</span>
+              </div>
+            )}
+
+            {hanaWithdrawTx && (
+              <div
+                className="flex items-center justify-between gap-3 rounded-lg border border-green-500/25 bg-green-500/[0.06] p-3 text-[12px] text-green-400"
+                role="status"
+              >
+                <span>HANA withdrawal confirmed.</span>
+                <a
+                  href={getExplorerTxUrl(hanaWithdrawTx)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex shrink-0 items-center gap-1 font-semibold hover:underline"
+                >
+                  View transaction <ExternalLink size={12} />
+                </a>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={
+                !address ||
+                isHanaBalanceLoading ||
+                isHanaWithdrawPending ||
+                isTransacting ||
+                hanaAmountNumber <= 0 ||
+                withdrawableHana <= 0n
+              }
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] py-3 text-[14px] font-bold text-black transition-all hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isHanaWithdrawPending ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Confirming HANA Withdrawal...
+                </>
+              ) : (
+                <>
+                  <Coins size={16} />
+                  Withdraw HANA
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+            <p className="text-[12px] font-semibold uppercase tracking-wider text-[#A3A3A3]">
+              Before you withdraw
+            </p>
+            <ul className="mt-3 space-y-3 text-[12px] leading-relaxed text-[#A3A3A3]">
+              <li className="flex gap-2">
+                <CheckCircle size={15} className="mt-0.5 shrink-0 text-[#FFB51D]" />
+                Amount is checked against the live HANA balance in the staking contract.
+              </li>
+              <li className="flex gap-2">
+                <CheckCircle size={15} className="mt-0.5 shrink-0 text-[#FFB51D]" />
+                Review the transaction and any contract fees in your wallet before confirming.
+              </li>
+              <li className="flex gap-2">
+                <CheckCircle size={15} className="mt-0.5 shrink-0 text-[#FFB51D]" />
+                Withdrawals are sent to the connected wallet on BNB Smart Chain Testnet.
+              </li>
+            </ul>
           </div>
         </div>
       </SectionCard>

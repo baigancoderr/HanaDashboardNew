@@ -213,13 +213,24 @@ export default function Overview() {
           sub="Level qualified members"
           color="gold"
         />
+
         <StatCard
+          icon={Coins}
+          label="Withdrawable Amount"
+          value={`${parseFloat(user?.hanaBalanceFormatted || "0").toLocaleString(undefined, { maximumFractionDigits: 2 })} HANA`}
+          sub="HANA balance from staking contract"
+          color="blue"
+        />
+
+        {/* <StatCard
           icon={Users}
           label="Direct Income"
           value={`$${directIncome.toLocaleString()}`}
           sub="5% direct referral"
           color="blue"
-        />
+        /> */}
+
+
         <StatCard
           icon={Zap}
           label="Level Income"
@@ -237,15 +248,16 @@ export default function Overview() {
       </div>
 
       {/* Active Staking Positions for Connected Wallet */}
-      <SectionCard
+      {/* <SectionCard
         title="Your Active Staking Positions"
-        subtitle="Live positions on the BSC Testnet contract for this connected wallet"
+        subtitle={`${stakes?.length || 0} position${stakes?.length === 1 ? "" : "s"} · BSC Testnet`}
+        className="border-[#FFB51D]/20 bg-gradient-to-br from-[#17140D] via-[#111] to-[#0B0B0B]"
         action={
           <a
             href="/dashboard/staking"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#161616] px-3 py-1.5 text-xs font-medium text-[#FFB51D] hover:bg-[#FFB51D]/10 hover:border-[#FFB51D]/40 transition"
+            className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-[#FFB51D]/25 bg-[#FFB51D]/[0.07] px-3 py-2 text-xs font-semibold text-[#FFCF61] transition hover:border-[#FFB51D]/50 hover:bg-[#FFB51D]/[0.12]"
           >
-            <span>+ New Stake / Manage</span>
+            <span>New Stake / Manage</span>
             <ExternalLink size={12} />
           </a>
         }
@@ -263,10 +275,14 @@ export default function Overview() {
                 DEFAULT_PACKAGES[0];
               const totalClaimedNum =
                 parseFloat(stake.totalClaimedFormatted) || 0;
-              const capNum = parseFloat(stake.capFormatted) || 1;
+              const capNum = parseFloat(stake.capFormatted) || 0;
+              const amountNum = parseFloat(stake.amountFormatted) || 0;
               const usedPercent = Math.min(
                 100,
-                Math.max(0, Math.round((totalClaimedNum / capNum) * 100))
+                Math.max(
+                  0,
+                  capNum > 0 ? Math.round((totalClaimedNum / capNum) * 100) : 0
+                )
               );
               const startDate = stake.startTime
                 ? new Date(stake.startTime * 1000).toLocaleDateString("en-US", {
@@ -279,85 +295,94 @@ export default function Overview() {
               return (
                 <div
                   key={stake.stakeIndex}
-                  className="rounded-xl border border-[#FFB51D]/25 bg-gradient-to-b from-[#FFB51D]/10 to-transparent p-4 transition-all hover:border-[#FFB51D]/50"
+                  className="group relative overflow-hidden rounded-xl border border-white/[0.08] bg-gradient-to-br from-[#1A1710] via-[#111] to-[#0A0A0A] p-4 transition-all hover:border-[#FFB51D]/35 hover:shadow-[0_8px_24px_rgba(0,0,0,0.2)] sm:p-5"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#FFE28A] to-[#FFB51D]">
-                        <Shield size={18} className="text-black" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-bold text-white">
-                            ${parseFloat(stake.amountFormatted).toLocaleString()}{" "}
+                  <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-[#FFB51D]/[0.05] blur-3xl transition group-hover:bg-[#FFB51D]/10" />
+                  <div className="relative">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-bold tracking-wide text-white">
                             {pkg.name} Package
                           </p>
                           <GoldBadge>{pkg.isDAO ? "DAO" : "Main"}</GoldBadge>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                          <span className="text-[11px] text-[#A3A3A3]">
-                            ID: #S-{stake.stakeIndex + 1} · {startDate}
+                        <p className="mt-1 text-[11px] text-[#858585]">
+                          Position #{stake.stakeIndex + 1}
+                          <span className="mx-1.5 text-white/20">·</span>
+                          Started {startDate}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
+                            stake.active
+                              ? "border-green-500/25 bg-green-500/10 text-green-400"
+                              : "border-white/10 bg-white/5 text-[#A3A3A3]"
+                          }`}
+                        >
+                          <span
+                            className={
+                              stake.active ? "text-green-400" : "text-[#737373]"
+                            }
+                          >
+                            ●
                           </span>
-                          {stake.txHash && (
-                            <a
-                              href={stake.explorerUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 font-mono text-[10px] text-[#FFB51D] hover:underline"
-                              title="View creation transaction on BscScan"
-                            >
-                              <span>
-                                Tx: {stake.txHash.slice(0, 6)}...
-                                {stake.txHash.slice(-4)}
-                              </span>
-                              <ExternalLink size={9} />
-                            </a>
-                          )}
-                        </div>
+                          {stake.active ? "Active" : "Capped"}
+                        </span>
+                        <span className="inline-flex items-center rounded-full border border-[#FFB51D]/20 bg-[#FFB51D]/[0.07] px-2.5 py-1 text-[10px] font-semibold text-[#FFCF61]">
+                          {pkg.dailyRate} daily
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <GoldBadge>{stake.active ? "● Active" : "○ Capped"}</GoldBadge>
-                      <span className="inline-flex items-center rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] font-semibold text-green-400">
-                        {pkg.dailyRate}
-                      </span>
-                    </div>
-                  </div>
 
-                  <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-2">
-                      <p className="text-[10px] text-[#737373]">Invested</p>
-                      <p className="mt-0.5 text-xs font-bold text-white">
-                        ${parseFloat(stake.amountFormatted).toLocaleString()}
-                      </p>
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <div className="rounded-lg border border-white/[0.06] bg-black/25 p-2.5">
+                        <p className="text-[9px] font-medium uppercase tracking-wider text-[#737373]">
+                          Invested
+                        </p>
+                        <p className="mt-1 text-xs font-bold text-white">
+                          ${amountNum.toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-white/[0.06] bg-black/25 p-2.5">
+                        <p className="text-[9px] font-medium uppercase tracking-wider text-[#737373]">
+                          Claimed
+                        </p>
+                        <p className="mt-1 text-xs font-bold text-green-400">
+                          ${totalClaimedNum.toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-white/[0.06] bg-black/25 p-2.5">
+                        <p className="text-[9px] font-medium uppercase tracking-wider text-[#737373]">
+                          Earnings Cap
+                        </p>
+                        <p className="mt-1 text-xs font-bold text-[#FFCF61]">
+                          ${capNum.toLocaleString()}
+                        </p>
+                      </div>
                     </div>
-                    <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-2">
-                      <p className="text-[10px] text-[#737373]">Claimed</p>
-                      <p className="mt-0.5 text-xs font-bold text-green-400">
-                        ${totalClaimedNum.toFixed(2)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-2">
-                      <p className="text-[10px] text-[#737373]">2X Cap</p>
-                      <p className="mt-0.5 text-xs font-bold text-[#FFB51D]">
-                        ${capNum.toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* Progress bar */}
-                  <div className="mt-3">
-                    <div className="mb-1 flex justify-between text-[10px]">
-                      <span className="text-[#A3A3A3]">2X Cap Progress</span>
-                      <span className="font-semibold text-[#FFB51D]">
-                        ${totalClaimedNum.toFixed(2)} / ${capNum.toLocaleString()} ({usedPercent}%)
-                      </span>
-                    </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-[#222]">
+                    <div className="mt-3">
+                      <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px]">
+                        <span className="text-[#858585]">Cap progress</span>
+                        <span className="font-semibold text-[#FFCF61]">
+                          {usedPercent}%
+                        </span>
+                      </div>
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] transition-all duration-500"
-                        style={{ width: `${usedPercent}%` }}
-                      />
+                        className="h-1.5 w-full overflow-hidden rounded-full bg-white/10"
+                        role="progressbar"
+                        aria-label={`Position ${stake.stakeIndex + 1} cap progress`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={usedPercent}
+                      >
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] transition-all duration-500"
+                          style={{ width: `${usedPercent}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -365,7 +390,7 @@ export default function Overview() {
             })}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.01] p-6 text-center">
+          <div className="rounded-xl border border-dashed border-[#FFB51D]/20 bg-gradient-to-br from-[#FFB51D]/[0.04] to-transparent p-6 text-center">
             <Shield size={32} className="mx-auto mb-2 text-neutral-500" />
             <p className="text-xs font-bold text-white">No Active Stakes Yet</p>
             <p className="mx-auto mt-1 max-w-sm text-[11px] text-neutral-400">
@@ -380,7 +405,7 @@ export default function Overview() {
             </a>
           </div>
         )}
-      </SectionCard>
+      </SectionCard> */}
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

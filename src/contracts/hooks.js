@@ -774,6 +774,95 @@ export function useClaimStakeROI() {
 }
 
 /**
+ * Withdraw HANA credited to a user's staking-contract balance
+ */
+export function useWithdrawHanaTokens() {
+  const [isPending, setIsPending] = useState(false);
+  const [error, setError] = useState("");
+  const { chainId, switchNetwork } = useAppKitNetwork();
+  const { walletProvider } = useAppKitProvider("eip155");
+
+  const withdraw = useCallback(
+    async (userAddress, amount) => {
+      setIsPending(true);
+      setError("");
+
+      try {
+        if (!userAddress || !isAddress(userAddress)) {
+          throw new Error("Please connect a valid wallet first.");
+        }
+        if (!walletProvider) {
+          throw new Error("No wallet provider detected. Please reconnect.");
+        }
+
+        if (Number(chainId) !== BSC_TESTNET_CHAIN_ID) {
+          if (!switchNetwork) {
+            throw new Error("Please switch your wallet to BNB Smart Chain Testnet.");
+          }
+          try {
+            await switchNetwork(bscTestnet);
+          } catch {
+            throw new Error(
+              "Please switch your wallet to BNB Smart Chain Testnet (Chain ID 97)."
+            );
+          }
+        }
+
+        const amountWei = parseEther(String(amount).trim());
+        if (amountWei <= 0n) {
+          throw new Error("Enter a HANA amount greater than zero.");
+        }
+
+        const normalizedAddress = getAddress(userAddress);
+        const browserProvider = new BrowserProvider(walletProvider);
+        const network = await browserProvider.getNetwork();
+        if (network.chainId !== BigInt(BSC_TESTNET_CHAIN_ID)) {
+          throw new Error(
+            "Wallet is not connected to BNB Smart Chain Testnet (Chain ID 97)."
+          );
+        }
+        const signer = await browserProvider.getSigner();
+        const signerAddress = await signer.getAddress();
+        if (signerAddress.toLowerCase() !== normalizedAddress.toLowerCase()) {
+          throw new Error("Connected wallet changed. Please refresh and try again.");
+        }
+
+        const staking = new Contract(
+          CONTRACT_ADDRESSES.stakingContract,
+          HANA_STAKING_ABI,
+          signer
+        );
+        const userData = await staking.users(normalizedAddress);
+        const availableHana = userData.hanaBalance ?? userData[7] ?? 0n;
+        if (amountWei > availableHana) {
+          throw new Error(
+            `Insufficient withdrawable HANA. Available: ${formatEther(availableHana)} HANA.`
+          );
+        }
+
+        const tx = await staking.withdrawTokens(amountWei);
+        await tx.wait(1);
+        return { success: true, hash: tx.hash };
+      } catch (err) {
+        console.error("HANA withdrawal error:", err);
+        const message =
+          err?.reason ||
+          err?.shortMessage ||
+          err?.message ||
+          "Failed to withdraw HANA.";
+        setError(message);
+        throw new Error(message);
+      } finally {
+        setIsPending(false);
+      }
+    },
+    [chainId, switchNetwork, walletProvider]
+  );
+
+  return { withdraw, isPending, error };
+}
+
+/**
  * Read on-chain Staking history from Staked events with transaction hashes
  */
 export function useStakingHistory(address) {
