@@ -179,7 +179,7 @@ export default function Withdrawals() {
       </div>
 
       {/* Withdrawal Form */}
-      <SectionCard
+      {/* <SectionCard
         title="Request Withdrawal"
         subtitle={
           withdrawalConfig
@@ -196,7 +196,7 @@ export default function Withdrawals() {
         )}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <form onSubmit={handleWithdrawSubmit} className="space-y-4">
-            {/* Amount Input */}
+          
             <div>
               <label className="mb-1.5 block text-[12px] font-medium text-[#A3A3A3]">
                 Withdrawal Amount (USDT)
@@ -231,7 +231,7 @@ export default function Withdrawals() {
               </p>
             </div>
 
-            {/* Wallet Address */}
+           
             <div>
               <label className="mb-1.5 block text-[12px] font-medium text-[#A3A3A3]">
                 Destination Wallet (Connected Wallet)
@@ -251,7 +251,7 @@ export default function Withdrawals() {
               </div>
             )}
 
-            {/* Fee Estimator */}
+           
             {withdrawalConfig ? (
               <div className="rounded-lg border border-[#222] bg-[#0A0A0A] p-4 space-y-2">
                 <div className="flex justify-between items-center">
@@ -310,7 +310,7 @@ export default function Withdrawals() {
             </button>
           </form>
 
-          {/* Rules Panel */}
+         
           <div className="space-y-3">
             <p className="text-[12px] font-semibold text-[#A3A3A3] uppercase tracking-wider">Withdrawal Rules</p>
 
@@ -363,7 +363,7 @@ export default function Withdrawals() {
             </div>
           </div>
         </div>
-      </SectionCard>
+      </SectionCard> */}
 
       <SectionCard
         title="Withdraw HANA"

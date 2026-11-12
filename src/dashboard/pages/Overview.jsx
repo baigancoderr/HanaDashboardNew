@@ -14,6 +14,7 @@ import {
   Check,
   ExternalLink,
   Loader2,
+  History,
 } from "lucide-react";
 import {
   AreaChart,
@@ -482,8 +483,9 @@ export default function Overview() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: "New Stake", icon: Shield, path: "/dashboard/staking", color: "from-[#FFE28A]/10 to-[#FFB51D]/5 border-[#FFB51D]/20 text-[#FFB51D]" },
-          { label: "View Packages", icon: Award, path: "/dashboard/packages", color: "from-purple-500/10 to-violet-500/5 border-purple-500/20 text-purple-400" },
+          // { label: "View Packages", icon: Award, path: "/dashboard/packages", color: "from-purple-500/10 to-violet-500/5 border-purple-500/20 text-purple-400" },
           { label: "Level Income", icon: Users, path: "/dashboard/levels", color: "from-white/10 to-white/5 border-white/15 text-neutral-200" },
+          { label: "Referral History", icon: History, path: "/dashboard/history/referral-income", color: "from-blue-500/10 to-cyan-500/5 border-blue-500/20 text-blue-300" },
           { label: "Withdraw Tokens", icon: Wallet, path: "/dashboard/withdrawals", color: "from-green-500/10 to-emerald-500/5 border-green-500/20 text-green-400" },
         ].map((item) => (
           <a

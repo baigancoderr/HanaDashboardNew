@@ -7,8 +7,8 @@ import Topbar from "./Topbar";
 
 const pageTitles = {
   "/dashboard": "Dashboard Overview",
-  "/dashboard/packages": "Packages",
-  "/dashboard/roi": "ROI & Income",
+  // "/dashboard/packages": "Packages",
+  // "/dashboard/roi": "ROI & Income",
   "/dashboard/levels": "Level Income",
   "/dashboard/ranks": "Rank Incentives",
   "/dashboard/dao": "DAO Partner Program",

@@ -476,7 +476,7 @@ export default function Staking() {
       </SectionCard>
 
       {/* On-Chain Staking History from Event Logs */}
-      <SectionCard
+      {/* <SectionCard
         title="Staking Transaction History"
         subtitle="Verified on-chain Staked event logs from the BSC Testnet contract"
         action={
@@ -574,7 +574,7 @@ export default function Staking() {
             </p>
           </div>
         )}
-      </SectionCard>
+      </SectionCard> */}
 
       {/* Sub-ID Rules */}
       <SectionCard
@@ -610,7 +610,7 @@ export default function Staking() {
       </SectionCard>
 
       {/* Credit Schedule */}
-      <SectionCard title="Credit Schedule" subtitle="How ROI is credited to your account">
+      {/* <SectionCard title="Credit Schedule" subtitle="How ROI is credited to your account">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
             {
@@ -649,7 +649,7 @@ export default function Staking() {
             </div>
           ))}
         </div>
-      </SectionCard>
+      </SectionCard> */}
 
       {/* Staking Modal / Dialog */}
       {selectedPkg && (

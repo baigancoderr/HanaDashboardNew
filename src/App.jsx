@@ -24,12 +24,12 @@ import HanaFeatures from './Components/HanaFeatures'
 // Dashboard
 import DashboardLayout from './dashboard/components/DashboardLayout'
 import Overview from './dashboard/pages/Overview'
-import Packages from './dashboard/pages/Packages'
-import ROIIncome from './dashboard/pages/ROIIncome'
+// import Packages from './dashboard/pages/Packages'
+// import ROIIncome from './dashboard/pages/ROIIncome'
 import LevelIncome from './dashboard/pages/LevelIncome'
 import RankIncentives from './dashboard/pages/RankIncentives'
 import DAOProgram from './dashboard/pages/DAOProgram'
-import BurnDSE from './dashboard/pages/BurnDSE'
+// import BurnDSE from './dashboard/pages/BurnDSE'
 import Tokenomics from './dashboard/pages/Tokenomics'
 import Withdrawals from './dashboard/pages/Withdrawals'
 import Compounding from './dashboard/pages/Compounding'
@@ -90,12 +90,12 @@ function App() {
         }
       >
         <Route index element={<Overview />} />
-        <Route path="packages" element={<Packages />} />
-        <Route path="roi" element={<ROIIncome />} />
+        {/* <Route path="packages" element={<Packages />} /> */}
+        {/* <Route path="roi" element={<ROIIncome />} /> */}
         <Route path="levels" element={<LevelIncome />} />
         <Route path="ranks" element={<RankIncentives />} />
         <Route path="dao" element={<DAOProgram />} />
-        <Route path="dse" element={<BurnDSE />} />
+        {/* <Route path="dse" element={<BurnDSE />} /> */}
         <Route path="tokenomics" element={<Tokenomics />} />
         <Route path="withdrawals" element={<Withdrawals />} />
         <Route path="compounding" element={<Compounding />} />

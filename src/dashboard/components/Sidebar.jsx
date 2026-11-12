@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
-  Package,
+  // Package,
   TrendingUp,
   Users,
   Award,
@@ -26,8 +26,9 @@ const navSections = [
     label: "WORKSPACE",
     items: [
       { icon: LayoutDashboard, label: "Overview", path: "/dashboard" },
-      { icon: Package, label: "Packages", path: "/dashboard/packages" },
-      { icon: TrendingUp, label: "ROI & Income", path: "/dashboard/roi" },
+      // { icon: Package, label: "Packages", path: "/dashboard/packages" },
+      // { icon: TrendingUp, label: "ROI & Income", path: "/dashboard/roi" },
+       { icon: Shield, label: "Staking", path: "/dashboard/staking" },
       { icon: Users, label: "Level Income", path: "/dashboard/levels" },
       { icon: Award, label: "Rank Incentives", path: "/dashboard/ranks" },
     ],
@@ -36,11 +37,11 @@ const navSections = [
     label: "ECOSYSTEM",
     items: [
       { icon: Crown, label: "DAO Program", path: "/dashboard/dao" },
-      { icon: Flame, label: "Burn & DSE", path: "/dashboard/dse" },
+      // { icon: Flame, label: "Burn & DSE", path: "/dashboard/dse" },
       { icon: Coins, label: "Tokenomics", path: "/dashboard/tokenomics" },
       { icon: Wallet, label: "Withdrawals", path: "/dashboard/withdrawals" },
       { icon: BarChart3, label: "Compounding", path: "/dashboard/compounding" },
-      { icon: Shield, label: "Staking", path: "/dashboard/staking" },
+     
       { icon: Settings, label: "Settings", path: "/dashboard/settings" },
     ],
   },

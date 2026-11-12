@@ -97,7 +97,7 @@ export default function Tokenomics() {
                     : "text-[#A3A3A3] hover:text-white"
                 }`}
               >
-                Buy HANA with USDT
+                Buy 
               </button>
               <button
                 type="button"
@@ -112,7 +112,7 @@ export default function Tokenomics() {
                     : "text-[#A3A3A3] hover:text-white"
                 }`}
               >
-                Sell HANA for USDT
+                Sell 
               </button>
             </div>
 
