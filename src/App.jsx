@@ -26,6 +26,7 @@ import DashboardLayout from './dashboard/components/DashboardLayout'
 import Overview from './dashboard/pages/Overview'
 // import Packages from './dashboard/pages/Packages'
 // import ROIIncome from './dashboard/pages/ROIIncome'
+import DirectIncome from './dashboard/pages/DirectIncome'
 import LevelIncome from './dashboard/pages/LevelIncome'
 import RankIncentives from './dashboard/pages/RankIncentives'
 import DAOProgram from './dashboard/pages/DAOProgram'
@@ -92,6 +93,7 @@ function App() {
         <Route index element={<Overview />} />
         {/* <Route path="packages" element={<Packages />} /> */}
         {/* <Route path="roi" element={<ROIIncome />} /> */}
+        <Route path="direct-income" element={<DirectIncome />} />
         <Route path="levels" element={<LevelIncome />} />
         <Route path="ranks" element={<RankIncentives />} />
         <Route path="dao" element={<DAOProgram />} />
