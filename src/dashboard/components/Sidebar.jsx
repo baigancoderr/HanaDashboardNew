@@ -17,7 +17,6 @@ import {
   Shield,
   History,
   Layers,
-  Activity,
 } from "lucide-react";
 import logo from "../../assets/logo.png";
 import token from "../../assets/token.png";
@@ -50,11 +49,6 @@ const navSections = [
   {
     label: "HISTORY",
     items: [
-      {
-        icon: Activity,
-        label: "Income History",
-        path: "/dashboard/history/income",
-      },
       {
         icon: Users,
         label: "Referral Income History",

@@ -32,8 +32,32 @@ const incomeColumns = [
     ),
   },
   {
+    key: "stakeAmount",
+    label: "Stake Amount",
+    render: (row) =>
+      row.stakeAmountFormatted ? (
+        <span className="font-semibold text-white">
+          ${row.stakeAmountFormatted} USDT
+        </span>
+      ) : (
+        <span className="text-neutral-500">—</span>
+      ),
+  },
+  {
+    key: "package",
+    label: "Package",
+    render: (row) =>
+      row.stakePackageName ? (
+        <span className="rounded-md border border-[#FFB51D]/20 bg-[#FFB51D]/5 px-2 py-0.5 text-[11px] font-semibold text-[#FFB51D]">
+          {row.stakePackageName}
+        </span>
+      ) : (
+        <span className="text-neutral-500">—</span>
+      ),
+  },
+  {
     key: "usdt",
-    label: "USDT Income",
+    label: "Your Income (5%)",
     render: (row) => (
       <span className="font-semibold text-green-400">+${row.usdtFormatted} USDT</span>
     ),
@@ -254,7 +278,7 @@ export default function DirectIncome() {
             emptyTitle="No direct income events yet"
             emptyDescription="Direct referral rewards allotted to your wallet on-chain will appear here."
             tableLabel="Direct income event logs"
-            minWidthClass="min-w-[680px]"
+            minWidthClass="min-w-[900px]"
           />
         ) : (
           <EventLogTable
