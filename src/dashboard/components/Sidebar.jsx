@@ -15,6 +15,8 @@ import {
   BarChart3,
   Settings,
   Shield,
+  History,
+  Layers,
 } from "lucide-react";
 import logo from "../../assets/logo.png";
 import token from "../../assets/token.png";
@@ -40,6 +42,21 @@ const navSections = [
       { icon: BarChart3, label: "Compounding", path: "/dashboard/compounding" },
       { icon: Shield, label: "Staking", path: "/dashboard/staking" },
       { icon: Settings, label: "Settings", path: "/dashboard/settings" },
+    ],
+  },
+  {
+    label: "HISTORY",
+    items: [
+      {
+        icon: Users,
+        label: "Referral Income History",
+        path: "/dashboard/history/referral-income",
+      },
+      {
+        icon: Layers,
+        label: "Level Income History",
+        path: "/dashboard/history/level-income",
+      },
     ],
   },
 ];

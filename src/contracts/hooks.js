@@ -168,24 +168,33 @@ async function fetchLogsInChunks(
   filter,
   fromBlock,
   toBlock,
-  chunkSize = 40000
+  chunkSize = 49999
 ) {
-  let allEvents = [];
-  let start = Math.max(0, fromBlock);
-  const endLimit = Math.max(start, toBlock);
+  const firstBlock = Math.max(0, fromBlock);
+  const lastBlock = Math.max(0, toBlock);
+  if (lastBlock < firstBlock) return [];
 
-  while (start <= endLimit) {
-    const end = Math.min(start + chunkSize, endLimit);
-    try {
-      const events = await contract.queryFilter(filter, start, end);
-      if (events && events.length) {
-        allEvents = allEvents.concat(events);
-      }
-    } catch (err) {
-      console.warn(`Query logs chunk [${start} - ${end}] failed:`, err);
-    }
-    start = end + 1;
+  const ranges = [];
+  for (let start = firstBlock; start <= lastBlock; start += chunkSize + 1) {
+    ranges.push([start, Math.min(start + chunkSize, lastBlock)]);
   }
+
+  const allEvents = [];
+  const concurrency = 8;
+  for (let index = 0; index < ranges.length; index += concurrency) {
+    const batch = await Promise.all(
+      ranges.slice(index, index + concurrency).map(async ([start, end]) => {
+        try {
+          return await contract.queryFilter(filter, start, end);
+        } catch (err) {
+          console.warn(`Query logs chunk [${start} - ${end}] failed:`, err);
+          return [];
+        }
+      }),
+    );
+    allEvents.push(...batch.flat());
+  }
+
   return allEvents;
 }
 
@@ -975,12 +984,13 @@ export function useStakingHistory(address) {
  * 1. Direct referral rewards from IncomeAllotted (where incomeType == 'direct')
  * 2. Registered direct referrals from Registered (where referrer == address)
  */
-export function useReferralHistory(address) {
+export function useReferralHistory(address, { includeRegistrations = true } = {}) {
   const [directIncomeHistory, setDirectIncomeHistory] = useState([]);
   const [registeredReferrals, setRegisteredReferrals] = useState([]);
   const [totalDirectEarnedUsdt, setTotalDirectEarnedUsdt] = useState(0);
   const [totalDirectEarnedHana, setTotalDirectEarnedHana] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
@@ -991,11 +1001,13 @@ export function useReferralHistory(address) {
       setRegisteredReferrals([]);
       setTotalDirectEarnedUsdt(0);
       setTotalDirectEarnedHana(0);
+      setError("");
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
+    setError("");
     try {
       const provider = getReadOnlyProvider();
       const staking = new Contract(
@@ -1014,7 +1026,9 @@ export function useReferralHistory(address) {
 
       const [incomeEvents, regEvents] = await Promise.all([
         fetchLogsInChunks(staking, incomeFilter, fromBlock, currentBlock).catch(() => []),
-        fetchLogsInChunks(staking, regFilter, fromBlock, currentBlock).catch(() => []),
+        includeRegistrations
+          ? fetchLogsInChunks(staking, regFilter, fromBlock, currentBlock).catch(() => [])
+          : Promise.resolve([]),
       ]);
 
       // Cache block timestamps & tx senders
@@ -1138,10 +1152,15 @@ export function useReferralHistory(address) {
       setRegisteredReferrals(parsedReg);
     } catch (err) {
       console.warn("Could not fetch referral history:", err);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not load referral income history.",
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
+  }, [includeRegistrations, normalizedAddr]);
 
   useEffect(() => {
     fetchReferralData();
@@ -1153,6 +1172,132 @@ export function useReferralHistory(address) {
     totalDirectEarnedUsdt,
     totalDirectEarnedHana,
     isLoading,
+    error,
     refetch: fetchReferralData,
+  };
+}
+
+export function useLevelIncomeHistory(address) {
+  const [incomeHistory, setIncomeHistory] = useState([]);
+  const [totalUsdt, setTotalUsdt] = useState(0);
+  const [totalHana, setTotalHana] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const isAddrValid = Boolean(address && isAddress(address));
+  const normalizedAddr = isAddrValid ? getAddress(address) : null;
+
+  const fetchLevelIncomeHistory = useCallback(async () => {
+    if (!normalizedAddr) {
+      setIncomeHistory([]);
+      setTotalUsdt(0);
+      setTotalHana(0);
+      setError("");
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+    try {
+      const provider = getReadOnlyProvider();
+      const staking = new Contract(
+        CONTRACT_ADDRESSES.stakingContract,
+        HANA_STAKING_ABI,
+        provider,
+      );
+      const currentBlock = await provider.getBlockNumber();
+      const filter = staking.filters.LevelIncomeAllotted(null, normalizedAddr);
+      const events = await fetchLogsInChunks(
+        staking,
+        filter,
+        Math.max(0, CONTRACT_START_BLOCK),
+        currentBlock,
+      );
+
+      const blockNumbers = [...new Set(events.map((event) => event.blockNumber))];
+      await Promise.all(
+        blockNumbers.map(async (blockNumber) => {
+          if (!blockCache.has(blockNumber)) {
+            try {
+              const block = await provider.getBlock(blockNumber);
+              if (block?.timestamp) {
+                blockCache.set(blockNumber, Number(block.timestamp));
+              }
+            } catch (blockError) {
+              console.warn("Could not fetch block timestamp:", blockError);
+            }
+          }
+        }),
+      );
+
+      let sumUsdt = 0;
+      let sumHana = 0;
+      const parsedIncome = events.map((event) => {
+        const fromAddress = event.args?.[0] ?? event.args?.from;
+        const level = Number(event.args?.[2] ?? event.args?.level ?? 0n);
+        const usdtWei = event.args?.[3] ?? event.args?.usdtValue ?? 0n;
+        const hanaWei = event.args?.[4] ?? event.args?.hanaAllotted ?? 0n;
+        const usdtNumber = Number(formatEther(usdtWei));
+        const hanaNumber = Number(formatEther(hanaWei));
+        const timestamp = blockCache.get(event.blockNumber) || null;
+
+        sumUsdt += usdtNumber;
+        sumHana += hanaNumber;
+
+        return {
+          fromAddress,
+          fromShort: fromAddress
+            ? `${fromAddress.slice(0, 6)}...${fromAddress.slice(-4)}`
+            : "Network member",
+          fromExplorerUrl: fromAddress
+            ? getExplorerAddressUrl(fromAddress)
+            : null,
+          level,
+          usdtFormatted: usdtNumber.toFixed(2),
+          hanaFormatted: hanaNumber.toFixed(2),
+          txHash: event.transactionHash,
+          txShort: `${event.transactionHash.slice(0, 8)}...${event.transactionHash.slice(-6)}`,
+          blockNumber: event.blockNumber,
+          explorerUrl: getExplorerTxUrl(event.transactionHash),
+          dateFormatted: timestamp
+            ? new Date(timestamp * 1000).toLocaleString("en-US", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : `Block #${event.blockNumber}`,
+        };
+      });
+
+      parsedIncome.sort((a, b) => b.blockNumber - a.blockNumber);
+      setIncomeHistory(parsedIncome);
+      setTotalUsdt(sumUsdt);
+      setTotalHana(sumHana);
+    } catch (fetchError) {
+      console.warn("Could not fetch level income history:", fetchError);
+      setError(
+        fetchError instanceof Error
+          ? fetchError.message
+          : "Could not load level income history.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [normalizedAddr]);
+
+  useEffect(() => {
+    fetchLevelIncomeHistory();
+  }, [fetchLevelIncomeHistory]);
+
+  return {
+    incomeHistory,
+    totalUsdt,
+    totalHana,
+    isLoading,
+    error,
+    refetch: fetchLevelIncomeHistory,
   };
 }

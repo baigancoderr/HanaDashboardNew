@@ -35,6 +35,8 @@ import Withdrawals from './dashboard/pages/Withdrawals'
 import Compounding from './dashboard/pages/Compounding'
 import Staking from './dashboard/pages/Staking'
 import Settings from './dashboard/pages/Settings'
+import ReferralIncomeHistory from './dashboard/pages/ReferralIncomeHistory'
+import LevelIncomeHistory from './dashboard/pages/LevelIncomeHistory'
 import DSESection from './Components/DSESection'
 import HanaStability from './Components/HanaStability'
 import DashboardAccessGate from './dashboard/components/DashboardAccessGate'
@@ -99,6 +101,8 @@ function App() {
         <Route path="compounding" element={<Compounding />} />
         <Route path="staking" element={<Staking />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="history/referral-income" element={<ReferralIncomeHistory />} />
+        <Route path="history/level-income" element={<LevelIncomeHistory />} />
       </Route>
     </Routes>
   )

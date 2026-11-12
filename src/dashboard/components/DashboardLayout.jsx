@@ -18,6 +18,8 @@ const pageTitles = {
   "/dashboard/compounding": "Locked Growth Compounding",
   "/dashboard/staking": "Staking",
   "/dashboard/settings": "Settings",
+  "/dashboard/history/referral-income": "Referral Income History",
+  "/dashboard/history/level-income": "Level Income History",
 };
 
 export default function DashboardLayout() {
