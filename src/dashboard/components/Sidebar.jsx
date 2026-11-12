@@ -17,6 +17,7 @@ import {
   Shield,
   History,
   Layers,
+  Network,
 } from "lucide-react";
 import logo from "../../assets/logo.png";
 import token from "../../assets/token.png";
@@ -30,6 +31,7 @@ const navSections = [
       // { icon: TrendingUp, label: "ROI & Income", path: "/dashboard/roi" },
       { icon: Shield, label: "Staking", path: "/dashboard/staking" },
       { icon: TrendingUp, label: "Direct Income", path: "/dashboard/direct-income" },
+      { icon: Network,    label: "My Team",       path: "/dashboard/my-team" },
       { icon: Users, label: "Level Income", path: "/dashboard/levels" },
       { icon: Award, label: "Rank Incentives", path: "/dashboard/ranks" },
     ],

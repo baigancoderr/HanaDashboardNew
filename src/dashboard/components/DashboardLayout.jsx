@@ -21,6 +21,7 @@ const pageTitles = {
   "/dashboard/settings": "Settings",
   "/dashboard/history/referral-income": "Referral Income History",
   "/dashboard/history/level-income": "Level Income History",
+  "/dashboard/my-team": "My Team",
 };
 
 export default function DashboardLayout() {

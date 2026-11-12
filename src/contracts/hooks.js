@@ -1834,3 +1834,515 @@ export function useIncomeHistory(address) {
     refetch: fetchAll,
   };
 }
+
+/**
+ * My Team hook — fetches all direct downline members (registered under my address)
+ * and enriches each with their on-chain business data:
+ *   - totalStaked (from users() mapping)
+ *   - total staking count + last stake date (from Staked events)
+ *   - registration date (from Registered event block timestamp)
+ */
+export function useMyTeam(address) {
+  const [members, setMembers] = useState([]);
+  const [totalTeamBusiness, setTotalTeamBusiness] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const isAddrValid = Boolean(address && isAddress(address));
+  const normalizedAddr = isAddrValid ? getAddress(address) : null;
+
+  const fetchTeam = useCallback(async () => {
+    if (!normalizedAddr) {
+      setMembers([]);
+      setTotalTeamBusiness(0);
+      setError("");
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const provider = getReadOnlyProvider();
+      const staking = new Contract(CONTRACT_ADDRESSES.stakingContract, HANA_STAKING_ABI, provider);
+
+      const currentBlock = await provider.getBlockNumber();
+      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
+
+      // 1. Fetch all Registered events where referrer == my address
+      const regFilter = staking.filters.Registered(null, normalizedAddr);
+      const regEvents = await fetchLogsInChunks(staking, regFilter, fromBlock, currentBlock).catch(() => []);
+
+      if (regEvents.length === 0) {
+        setMembers([]);
+        setTotalTeamBusiness(0);
+        setIsLoading(false);
+        return;
+      }
+
+      // Cache block timestamps for registration events
+      const regBlockNums = [...new Set(regEvents.map((e) => e.blockNumber))];
+      await Promise.all(
+        regBlockNums.map(async (bNum) => {
+          if (!blockCache.has(bNum)) {
+            try {
+              const b = await provider.getBlock(bNum);
+              if (b?.timestamp) blockCache.set(bNum, Number(b.timestamp));
+            } catch {}
+          }
+        })
+      );
+
+      // 2. Get unique member addresses
+      const memberAddresses = [
+        ...new Set(
+          regEvents
+            .map((e) => e.args?.[0] ?? e.args?.user)
+            .filter(Boolean)
+            .map((a) => getAddress(a))
+        ),
+      ];
+
+      // 3. For each member: fetch users() data + their Staked events — in parallel batches
+      const BATCH = 5; // max concurrent RPC calls
+      const enriched = [];
+
+      for (let i = 0; i < memberAddresses.length; i += BATCH) {
+        const batch = memberAddresses.slice(i, i + BATCH);
+
+        const batchResults = await Promise.all(
+          batch.map(async (memberAddr) => {
+            // Find registration event for this member
+            const regEv = regEvents.find(
+              (e) => e.args?.[0] && getAddress(e.args[0]) === memberAddr
+            );
+            const regTimestamp = regEv ? blockCache.get(regEv.blockNumber) || null : null;
+
+            // Fetch user contract data + staked events in parallel
+            const [userData, stakedEvts] = await Promise.allSettled([
+              staking.users(memberAddr),
+              fetchLogsInChunks(
+                staking,
+                staking.filters.Staked(memberAddr),
+                fromBlock,
+                currentBlock
+              ).catch(() => []),
+            ]);
+
+            // Parse users() struct
+            let totalStakedWei = 0n;
+            let isDAO = false;
+            if (userData.status === "fulfilled" && userData.value) {
+              const d = userData.value;
+              totalStakedWei = d.totalStaked ?? d[1] ?? 0n;
+              isDAO = Boolean(d.isDAO ?? d[14]);
+            }
+            const totalStakedNum = Number(formatEther(totalStakedWei));
+
+            // Parse Staked events
+            let stakeCount = 0;
+            let lastStakeTimestamp = null;
+            let lastStakeAmount = null;
+            let lastPackageName = null;
+
+            if (stakedEvts.status === "fulfilled" && stakedEvts.value.length > 0) {
+              const evts = stakedEvts.value;
+              stakeCount = evts.length;
+
+              // Cache timestamps for stake events
+              const stakeBlocks = [...new Set(evts.map((e) => e.blockNumber))];
+              await Promise.all(
+                stakeBlocks.map(async (bNum) => {
+                  if (!blockCache.has(bNum)) {
+                    try {
+                      const b = await provider.getBlock(bNum);
+                      if (b?.timestamp) blockCache.set(bNum, Number(b.timestamp));
+                    } catch {}
+                  }
+                })
+              );
+
+              // Last stake = highest block number
+              const lastEv = evts.reduce((a, b) =>
+                a.blockNumber > b.blockNumber ? a : b
+              );
+              lastStakeTimestamp = blockCache.get(lastEv.blockNumber) || null;
+              const lastAmtWei = lastEv.args?.[2] ?? lastEv.args?.amount ?? 0n;
+              lastStakeAmount = Number(formatEther(lastAmtWei));
+              const lastPkgId = Number(lastEv.args?.[1] ?? lastEv.args?.packageId ?? 0);
+              const pkg = DEFAULT_PACKAGES.find((p) => p.id === lastPkgId);
+              lastPackageName = pkg?.name ?? `Package #${lastPkgId}`;
+            }
+
+            const fmtDate = (ts) =>
+              ts
+                ? new Date(ts * 1000).toLocaleString("en-US", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                  })
+                : null;
+
+            return {
+              address: memberAddr,
+              addressShort: `${memberAddr.slice(0, 6)}...${memberAddr.slice(-4)}`,
+              explorerUrl: getExplorerAddressUrl(memberAddr),
+              isDAO,
+              // Registration
+              joinedTimestamp: regTimestamp,
+              joinedFormatted: fmtDate(regTimestamp) ?? "—",
+              regTxHash: regEv?.transactionHash ?? null,
+              regTxShort: regEv
+                ? `${regEv.transactionHash.slice(0, 8)}...${regEv.transactionHash.slice(-6)}`
+                : null,
+              regExplorerUrl: regEv ? getExplorerTxUrl(regEv.transactionHash) : null,
+              // Business
+              totalStaked: totalStakedWei,
+              totalStakedFormatted: totalStakedNum.toFixed(2),
+              totalStakedNum,
+              stakeCount,
+              lastStakeTimestamp,
+              lastStakeFormatted: fmtDate(lastStakeTimestamp) ?? "—",
+              lastStakeAmount,
+              lastStakeAmountFormatted:
+                lastStakeAmount !== null ? lastStakeAmount.toFixed(2) : null,
+              lastPackageName,
+            };
+          })
+        );
+
+        enriched.push(...batchResults);
+      }
+
+      // Sort by total staked desc
+      enriched.sort((a, b) => b.totalStakedNum - a.totalStakedNum);
+
+      const totalBusiness = enriched.reduce((sum, m) => sum + m.totalStakedNum, 0);
+      setMembers(enriched);
+      setTotalTeamBusiness(totalBusiness);
+    } catch (err) {
+      console.warn("Could not fetch team data:", err);
+      setError(err instanceof Error ? err.message : "Could not load team data.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [normalizedAddr]);
+
+  useEffect(() => {
+    fetchTeam();
+  }, [fetchTeam]);
+
+  return { members, totalTeamBusiness, isLoading, error, refetch: fetchTeam };
+}
+
+/**
+ * useTeamByLevel — BFS tree traversal up to MAX_LEVEL (20) depth.
+ *
+ * Strategy:
+ *  - Level 1 = wallets registered directly under `address` (Registered(null, address))
+ *  - Level 2 = wallets registered under each Level-1 member
+ *  - ... and so on up to level 20.
+ *
+ * To avoid re-fetching the same address twice (diamond referrals), we keep
+ * a global `visited` Set.
+ *
+ * Returns:
+ *   levelMap   — Map<levelNumber, MemberInfo[]>
+ *   allMembers — flat array with { ...memberInfo, level }
+ *   levelStats — array of { level, count, totalBusiness } for all 20 levels
+ *   isLoading / error / refetch
+ */
+const MAX_LEVEL = 20;
+
+// ─── Team caches (module-level, persist for browser session) ───────────────
+// childrenCache: parentAddr → { children: addr[], evts: LogEvent[] }
+const teamChildrenCache  = new Map();
+// memberDataCache: memberAddr → enriched member data object (without level/reg)
+const teamMemberDataCache = new Map();
+// resultCache: rootAddr → { levelMap, allMembers, levelStats } — full BFS result
+const teamResultCache    = new Map();
+
+export function useTeamByLevel(address) {
+  const [levelMap, setLevelMap]     = useState(new Map());
+  const [allMembers, setAllMembers] = useState([]);
+  const [levelStats, setLevelStats] = useState([]);
+  const [isLoading, setIsLoading]   = useState(false);
+  const [error, setError]           = useState("");
+
+  // Track if we imported from cache so UI shows instantly
+  const [fromCache, setFromCache]   = useState(false);
+
+  const isAddrValid    = Boolean(address && isAddress(address));
+  const normalizedAddr = isAddrValid ? getAddress(address) : null;
+
+  const fetchTree = useCallback(async (forceRefresh = false) => {
+    if (!normalizedAddr) {
+      setLevelMap(new Map());
+      setAllMembers([]);
+      setLevelStats([]);
+      setError("");
+      setIsLoading(false);
+      setFromCache(false);
+      return;
+    }
+
+    const cacheKey = normalizedAddr.toLowerCase();
+
+    // ── Serve from result cache immediately (unless force refresh) ──
+    if (!forceRefresh && teamResultCache.has(cacheKey)) {
+      const cached = teamResultCache.get(cacheKey);
+      setLevelMap(cached.levelMap);
+      setAllMembers(cached.allMembers);
+      setLevelStats(cached.levelStats);
+      setFromCache(true);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setFromCache(false);
+    setError("");
+
+    try {
+      const provider   = getReadOnlyProvider();
+      const staking    = new Contract(CONTRACT_ADDRESSES.stakingContract, HANA_STAKING_ABI, provider);
+
+      const currentBlock = await provider.getBlockNumber();
+      const fromBlock    = Math.max(0, CONTRACT_START_BLOCK);
+
+      // ── Helper 1: get direct children of a set of parents ──────────────────
+      // Uses teamChildrenCache to avoid re-querying same parent address
+      const getChildrenOfSet = async (parentAddrs) => {
+        const childMap = new Map();
+        const uncached = parentAddrs.filter((p) => !teamChildrenCache.has(p.toLowerCase()));
+
+        // Fetch only uncached parents (8 concurrent)
+        const BATCH = 8;
+        for (let i = 0; i < uncached.length; i += BATCH) {
+          const slice   = uncached.slice(i, i + BATCH);
+          const results = await Promise.all(
+            slice.map(async (parent) => {
+              try {
+                const filter   = staking.filters.Registered(null, parent);
+                const evts     = await fetchLogsInChunks(staking, filter, fromBlock, currentBlock).catch(() => []);
+                const children = evts
+                  .map((e) => e.args?.[0] ?? e.args?.user)
+                  .filter(Boolean)
+                  .map((a) => getAddress(a));
+                return { parent, children, evts };
+              } catch {
+                return { parent, children: [], evts: [] };
+              }
+            })
+          );
+          for (const { parent, children, evts } of results) {
+            teamChildrenCache.set(parent.toLowerCase(), { children, evts });
+          }
+        }
+
+        // Build result from cache (now all parents are cached)
+        for (const parent of parentAddrs) {
+          const cached = teamChildrenCache.get(parent.toLowerCase()) ?? { children: [], evts: [] };
+          childMap.set(parent, cached);
+        }
+        return childMap;
+      };
+
+      // ── Helper 2: enrich addresses with business data ───────────────────────
+      // Uses teamMemberDataCache to skip already-fetched addresses
+      const enrichAddresses = async (addrs) => {
+        const uncached = addrs.filter((a) => !teamMemberDataCache.has(a.toLowerCase()));
+
+        const BATCH = 5;
+        for (let i = 0; i < uncached.length; i += BATCH) {
+          const slice = uncached.slice(i, i + BATCH);
+          const batch = await Promise.all(
+            slice.map(async (memberAddr) => {
+              const [userData, stakedEvts] = await Promise.allSettled([
+                staking.users(memberAddr),
+                fetchLogsInChunks(
+                  staking,
+                  staking.filters.Staked(memberAddr),
+                  fromBlock,
+                  currentBlock
+                ).catch(() => []),
+              ]);
+
+              let totalStakedWei = 0n, isDAO = false;
+              if (userData.status === "fulfilled" && userData.value) {
+                const d        = userData.value;
+                totalStakedWei = d.totalStaked ?? d[1] ?? 0n;
+                isDAO          = Boolean(d.isDAO ?? d[14]);
+              }
+              const totalStakedNum = Number(formatEther(totalStakedWei));
+
+              let stakeCount = 0, lastStakeTimestamp = null, lastStakeAmount = null, lastPackageName = null;
+              if (stakedEvts.status === "fulfilled" && stakedEvts.value.length > 0) {
+                const evts  = stakedEvts.value;
+                stakeCount  = evts.length;
+
+                const blks = [...new Set(evts.map((e) => e.blockNumber))];
+                await Promise.all(blks.map(async (bNum) => {
+                  if (!blockCache.has(bNum)) {
+                    try {
+                      const b = await provider.getBlock(bNum);
+                      if (b?.timestamp) blockCache.set(bNum, Number(b.timestamp));
+                    } catch {}
+                  }
+                }));
+
+                const lastEv       = evts.reduce((a, b) => a.blockNumber > b.blockNumber ? a : b);
+                lastStakeTimestamp = blockCache.get(lastEv.blockNumber) || null;
+                const lastAmtWei   = lastEv.args?.[2] ?? lastEv.args?.amount ?? 0n;
+                lastStakeAmount    = Number(formatEther(lastAmtWei));
+                const lastPkgId    = Number(lastEv.args?.[1] ?? lastEv.args?.packageId ?? 0);
+                lastPackageName    = DEFAULT_PACKAGES.find((p) => p.id === lastPkgId)?.name ?? `Package #${lastPkgId}`;
+              }
+
+              const fmtDate = (ts) =>
+                ts
+                  ? new Date(ts * 1000).toLocaleString("en-US", {
+                      day: "2-digit", month: "short", year: "numeric",
+                    })
+                  : null;
+
+              const memberData = {
+                address:                 memberAddr,
+                addressShort:            `${memberAddr.slice(0, 6)}...${memberAddr.slice(-4)}`,
+                explorerUrl:             getExplorerAddressUrl(memberAddr),
+                isDAO,
+                totalStaked:             totalStakedWei,
+                totalStakedFormatted:    totalStakedNum.toFixed(2),
+                totalStakedNum,
+                stakeCount,
+                lastStakeTimestamp,
+                lastStakeFormatted:          fmtDate(lastStakeTimestamp) ?? "—",
+                lastStakeAmount,
+                lastStakeAmountFormatted: lastStakeAmount !== null ? lastStakeAmount.toFixed(2) : null,
+                lastPackageName,
+              };
+
+              // Store in member cache
+              teamMemberDataCache.set(memberAddr.toLowerCase(), memberData);
+              return memberData;
+            })
+          );
+        }
+
+        // Return all (cached + newly fetched)
+        return addrs.map(
+          (a) => teamMemberDataCache.get(a.toLowerCase()) ?? { address: a, totalStakedNum: 0, stakeCount: 0 }
+        );
+      };
+
+      // ── BFS traversal ───────────────────────────────────────────────────────
+      const visited      = new Set([normalizedAddr.toLowerCase()]);
+      const newLevelMap  = new Map();
+      const flatAll      = [];
+
+      let currentParents = [normalizedAddr];
+
+      for (let level = 1; level <= MAX_LEVEL; level++) {
+        const childrenMap = await getChildrenOfSet(currentParents);
+
+        const childAddrs  = [];
+        const regEventMap = new Map();
+
+        for (const [, { children, evts }] of childrenMap) {
+          for (let ci = 0; ci < children.length; ci++) {
+            const child     = children[ci].toLowerCase();
+            const childNorm = getAddress(children[ci]);
+            if (!visited.has(child)) {
+              visited.add(child);
+              childAddrs.push(childNorm);
+              if (evts[ci]) regEventMap.set(childNorm, evts[ci]);
+            }
+          }
+        }
+
+        if (childAddrs.length === 0) break;
+
+        // Cache reg block timestamps
+        const regBlocks = [...new Set([...regEventMap.values()].map((e) => e.blockNumber))];
+        await Promise.all(regBlocks.map(async (bNum) => {
+          if (!blockCache.has(bNum)) {
+            try {
+              const b = await provider.getBlock(bNum);
+              if (b?.timestamp) blockCache.set(bNum, Number(b.timestamp));
+            } catch {}
+          }
+        }));
+
+        const enriched = await enrichAddresses(childAddrs);
+
+        const withReg = enriched.map((m) => {
+          const regEv        = regEventMap.get(m.address) || null;
+          const regTimestamp = regEv ? (blockCache.get(regEv.blockNumber) || null) : null;
+          const fmtDate = (ts) =>
+            ts
+              ? new Date(ts * 1000).toLocaleString("en-US", {
+                  day: "2-digit", month: "short", year: "numeric",
+                })
+              : null;
+          return {
+            ...m,
+            level,
+            joinedTimestamp: regTimestamp,
+            joinedFormatted: fmtDate(regTimestamp) ?? "—",
+            regTxHash:       regEv?.transactionHash ?? null,
+            regTxShort:      regEv
+              ? `${regEv.transactionHash.slice(0, 8)}...${regEv.transactionHash.slice(-6)}`
+              : null,
+            regExplorerUrl:  regEv ? getExplorerTxUrl(regEv.transactionHash) : null,
+          };
+        });
+
+        newLevelMap.set(level, withReg);
+        flatAll.push(...withReg);
+        currentParents = childAddrs;
+      }
+
+      const stats = Array.from({ length: MAX_LEVEL }, (_, i) => {
+        const lvl     = i + 1;
+        const mems    = newLevelMap.get(lvl) ?? [];
+        return {
+          level:         lvl,
+          count:         mems.length,
+          totalBusiness: mems.reduce((s, m) => s + m.totalStakedNum, 0),
+        };
+      });
+
+      // ── Store full result in result cache ────────────────────────────────────
+      teamResultCache.set(cacheKey, { levelMap: newLevelMap, allMembers: flatAll, levelStats: stats });
+
+      setLevelMap(newLevelMap);
+      setAllMembers(flatAll);
+      setLevelStats(stats);
+      setFromCache(false);
+    } catch (err) {
+      console.warn("useTeamByLevel error:", err);
+      setError(err instanceof Error ? err.message : "Could not load team levels.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [normalizedAddr]);
+
+  // On mount / address change — serve cache first, then background refresh
+  useEffect(() => {
+    fetchTree(false);
+  }, [fetchTree]);
+
+  // Manual refetch clears result cache for this address so fresh data is fetched
+  const hardRefetch = useCallback(() => {
+    if (normalizedAddr) {
+      teamResultCache.delete(normalizedAddr.toLowerCase());
+      // Also clear member-level caches so stale business data is re-fetched
+      teamChildrenCache.clear();
+      teamMemberDataCache.clear();
+    }
+    fetchTree(true);
+  }, [normalizedAddr, fetchTree]);
+
+  return { levelMap, allMembers, levelStats, fromCache, isLoading, error, refetch: hardRefetch };
+}
