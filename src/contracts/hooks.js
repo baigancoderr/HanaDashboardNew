@@ -1282,27 +1282,47 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
   };
 }
 
+// ─── Level income cache ──────────────────────────────────────────────────────
+// addr → { incomeHistory, totalUsdt, totalHana }
+const levelIncomeCache = new Map();
+
 export function useLevelIncomeHistory(address) {
   const [incomeHistory, setIncomeHistory] = useState([]);
   const [totalUsdt, setTotalUsdt] = useState(0);
   const [totalHana, setTotalHana] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
   const [error, setError] = useState("");
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
 
-  const fetchLevelIncomeHistory = useCallback(async () => {
+  const fetchLevelIncomeHistory = useCallback(async (forceRefresh = false) => {
     if (!normalizedAddr) {
       setIncomeHistory([]);
       setTotalUsdt(0);
       setTotalHana(0);
       setError("");
+      setFromCache(false);
+      setIsLoading(false);
+      return;
+    }
+
+    const cacheKey = normalizedAddr.toLowerCase();
+
+    // Serve from cache instantly
+    if (!forceRefresh && levelIncomeCache.has(cacheKey)) {
+      const cached = levelIncomeCache.get(cacheKey);
+      setIncomeHistory(cached.incomeHistory);
+      setTotalUsdt(cached.totalUsdt);
+      setTotalHana(cached.totalHana);
+      setFromCache(true);
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
+    setFromCache(false);
     setError("");
     try {
       const provider = getReadOnlyProvider();
@@ -1390,9 +1410,18 @@ export function useLevelIncomeHistory(address) {
 
       const parsedIncome = [...parsedPrimary, ...parsedFallback];
       parsedIncome.sort((a, b) => b.blockNumber - a.blockNumber);
+
+      // Store in cache
+      levelIncomeCache.set(cacheKey, {
+        incomeHistory: parsedIncome,
+        totalUsdt: sumUsdt,
+        totalHana: sumHana,
+      });
+
       setIncomeHistory(parsedIncome);
       setTotalUsdt(sumUsdt);
       setTotalHana(sumHana);
+      setFromCache(false);
     } catch (fetchError) {
       console.warn("Could not fetch level income history:", fetchError);
       setError(
@@ -1409,13 +1438,19 @@ export function useLevelIncomeHistory(address) {
     fetchLevelIncomeHistory();
   }, [fetchLevelIncomeHistory]);
 
+  const hardRefetch = useCallback(() => {
+    if (normalizedAddr) levelIncomeCache.delete(normalizedAddr.toLowerCase());
+    fetchLevelIncomeHistory(true);
+  }, [normalizedAddr, fetchLevelIncomeHistory]);
+
   return {
     incomeHistory,
     totalUsdt,
     totalHana,
+    fromCache,
     isLoading,
     error,
-    refetch: fetchLevelIncomeHistory,
+    refetch: hardRefetch,
   };
 }
 
@@ -2279,6 +2314,8 @@ export function useTeamByLevel(address) {
         const withReg = enriched.map((m) => {
           const regEv        = regEventMap.get(m.address) || null;
           const regTimestamp = regEv ? (blockCache.get(regEv.blockNumber) || null) : null;
+          const sponsorAddr  = regEv ? (regEv.args?.[1] ?? regEv.args?.referrer ?? null) : null;
+          const sponsor      = sponsorAddr ? getAddress(sponsorAddr) : null;
           const fmtDate = (ts) =>
             ts
               ? new Date(ts * 1000).toLocaleString("en-US", {
@@ -2295,6 +2332,10 @@ export function useTeamByLevel(address) {
               ? `${regEv.transactionHash.slice(0, 8)}...${regEv.transactionHash.slice(-6)}`
               : null,
             regExplorerUrl:  regEv ? getExplorerTxUrl(regEv.transactionHash) : null,
+            // Sponsor (referrer) data from Registered event args[1]
+            sponsor,
+            sponsorShort:       sponsor ? `${sponsor.slice(0, 6)}...${sponsor.slice(-4)}` : null,
+            sponsorExplorerUrl: sponsor ? getExplorerAddressUrl(sponsor) : null,
           };
         });
 

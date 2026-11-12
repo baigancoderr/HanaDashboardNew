@@ -78,6 +78,7 @@ export default function LevelIncome() {
     incomeHistory,
     totalUsdt,
     totalHana,
+    fromCache,
     isLoading,
     error,
     refetch,
@@ -197,6 +198,11 @@ export default function LevelIncome() {
         subtitle="Verified level commissions credited to your wallet on BSC Testnet"
         action={
           <div className="flex flex-wrap items-center gap-2">
+            {fromCache && (
+              <span className="inline-flex items-center gap-1 rounded-md border border-[#FFB51D]/20 bg-[#FFB51D]/5 px-2 py-1 text-[10px] font-semibold text-[#FFB51D]">
+                ⚡ Cached
+              </span>
+            )}
             {levelBreakdown.length > 0 && (
               <select
                 aria-label="Filter by level"

@@ -218,7 +218,7 @@ export default function Overview() {
         <StatCard
           icon={Coins}
           label="Withdrawable Amount"
-          value={`${parseFloat(user?.hanaBalanceFormatted || "0").toLocaleString(undefined, { maximumFractionDigits: 2 })} HANA`}
+          value={`${parseFloat(user?.hanaBalanceFormatted || "0").toLocaleString(undefined, { maximumFractionDigits: 2 })} `}
           sub="HANA balance from staking contract"
           color="blue"
         />
