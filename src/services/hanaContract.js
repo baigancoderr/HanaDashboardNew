@@ -14,7 +14,7 @@ import { ethers } from "ethers";
 import { BSC, CONTRACTS } from "../config/contracts";
 import { HANA_TOKEN_ABI } from "../contracts/hanaTokenABI";
 import { USDT_ABI } from "../contracts/usdtABI";
-import { STAKING_ABI } from "../contracts/stakingABI";
+import { HANA_STAKING_ABI } from "../contracts/abis";
 import { getActiveWalletProvider } from "./walletProvider";
 
 // ======================== ERROR HANDLING ========================
@@ -139,7 +139,7 @@ function getUsdtContract(signerOrProvider) {
 }
 
 function getStakingContract(signerOrProvider) {
-  return new ethers.Contract(CONTRACTS.stakingContract, STAKING_ABI, signerOrProvider);
+  return new ethers.Contract(CONTRACTS.stakingContract, HANA_STAKING_ABI, signerOrProvider);
 }
 
 // ======================== ERROR PARSER ========================
@@ -316,17 +316,17 @@ export async function getUserData(address) {
   const contract = getStakingContract(readProvider);
   const data = await contract.users(address);
   return {
-    referrer: data.referrer,
-    totalStaked: ethers.formatEther(data.totalStaked),
-    totalDirectIncome: ethers.formatEther(data.totalDirectIncome),
-    totalLevelIncome: ethers.formatEther(data.totalLevelIncome),
-    totalRankIncome: ethers.formatEther(data.totalRankIncome),
-    totalWithdrawn: ethers.formatEther(data.totalWithdrawn),
-    lastWithdrawalTime: Number(data.lastWithdrawalTime),
-    firstStakeTime: Number(data.firstStakeTime),
-    isDAO: data.isDAO,
-    daoJoinTime: Number(data.daoJoinTime),
-    daoEndTime: Number(data.daoEndTime),
+    referrer: data.referrer ?? data[0],
+    totalStaked: ethers.formatEther(data.totalStaked ?? data[1] ?? 0n),
+    totalDirectIncome: ethers.formatEther(data.totalDirectIncome ?? data.totalDirect ?? data[3] ?? 0n),
+    totalLevelIncome: ethers.formatEther(data.totalLevelIncome ?? data.totalLevel ?? data[4] ?? 0n),
+    totalRankIncome: ethers.formatEther(data.totalRankIncome ?? data.totalRank ?? data[5] ?? 0n),
+    totalWithdrawn: ethers.formatEther(data.totalWithdrawn ?? data.totalWithdrawnHana ?? data[8] ?? 0n),
+    lastWithdrawalTime: Number(data.lastWithdrawalTime ?? data[10] ?? 0n),
+    firstStakeTime: Number(data.firstStakeTime ?? data[9] ?? 0n),
+    isDAO: Boolean(data.isDAO ?? data[14]),
+    daoJoinTime: Number(data.daoJoinTime ?? data[15] ?? 0n),
+    daoEndTime: Number(data.daoEndTime ?? data[16] ?? 0n),
   };
 }
 
@@ -335,13 +335,13 @@ export async function getUserStakes(address) {
   const stakes = await contract.getUserStakes(address);
   return stakes.map((s, index) => ({
     index,
-    packageId: Number(s.packageId),
-    amount: ethers.formatEther(s.amount),
-    startTime: Number(s.startTime),
-    lastClaimTime: Number(s.lastClaimTime),
-    totalClaimed: ethers.formatEther(s.totalClaimed),
-    cap: ethers.formatEther(s.cap),
-    active: s.active,
+    packageId: Number(s.packageId ?? s[0] ?? 0n),
+    amount: ethers.formatEther(s.amount ?? s[1] ?? 0n),
+    startTime: Number(s.startTime ?? s[3] ?? 0n),
+    lastClaimTime: Number(s.lastClaimTime ?? s[4] ?? 0n),
+    totalClaimed: ethers.formatEther(s.totalClaimed ?? s[5] ?? 0n),
+    cap: ethers.formatEther(s.cap ?? s[6] ?? 0n),
+    active: Boolean(s.active ?? s[7]),
   }));
 }
 
@@ -351,15 +351,39 @@ export async function getPendingROI(address, stakeIndex) {
   return ethers.formatEther(pending);
 }
 
+const unsupportedViewCache = new Set();
+
+async function callOptionalUint256(contractAddress, signature) {
+  const cacheKey = `${contractAddress.toLowerCase()}:${signature}`;
+  if (unsupportedViewCache.has(cacheKey)) return null;
+
+  try {
+    const selector = ethers.id(signature).slice(0, 10);
+    const raw = await readProvider.call({ to: contractAddress, data: selector });
+    if (!raw || raw === "0x") {
+      unsupportedViewCache.add(cacheKey);
+      return null;
+    }
+    return BigInt(raw);
+  } catch (err) {
+    if (err?.code === "CALL_EXCEPTION") {
+      unsupportedViewCache.add(cacheKey);
+    }
+    return null;
+  }
+}
+
 export async function getPackageInfo(packageId) {
   const contract = getStakingContract(readProvider);
   const pkg = await contract.packages(packageId);
   return {
-    minAmount: ethers.formatEther(pkg.minAmount),
-    dailyRateBps: Number(pkg.dailyRateBps),
-    capMultiplier: Number(pkg.capMultiplier),
-    isDAO: pkg.isDAO,
-    active: pkg.active,
+    name: pkg.name ?? pkg[0] ?? `Package #${packageId}`,
+    minAmount: ethers.formatEther(pkg.minAmount ?? pkg[1] ?? 0n),
+    dailyRateBps: Number(pkg.dailyRateBps ?? pkg[2] ?? 0n),
+    capMultiplier: Number(pkg.capMultiplier ?? pkg[3] ?? 0n),
+    canOpenLevels: Boolean(pkg.canOpenLevels ?? pkg[4]),
+    isDAO: Boolean(pkg.isDAO ?? pkg[5]),
+    active: Boolean(pkg.active ?? pkg[6]),
   };
 }
 
@@ -380,9 +404,11 @@ export async function getAllPackages() {
 }
 
 export async function getDaoMemberCount() {
-  const contract = getStakingContract(readProvider);
-  const count = await contract.daoMemberCount();
-  return Number(count);
+  const count = await callOptionalUint256(
+    CONTRACTS.stakingContract,
+    "daoMemberCount()"
+  );
+  return count !== null ? Number(count) : null;
 }
 
 export async function getMaxDaoMembers() {
@@ -393,20 +419,21 @@ export async function getMaxDaoMembers() {
 
 export async function getWithdrawalConfig() {
   const contract = getStakingContract(readProvider);
-  const [adminFeeBps, swapFeeBps, ecosystemFeeBps, maxWithdrawalPerDay, coolingPeriod] =
+  const [adminFeeBps, swapFeeBps, ecosystemFeeBps, coolingPeriod, maxWithdrawalRaw] =
     await Promise.all([
       contract.adminFeeBps(),
       contract.swapFeeBps(),
       contract.ecosystemFeeBps(),
-      contract.maxWithdrawalPerDay(),
       contract.coolingPeriod(),
+      callOptionalUint256(CONTRACTS.stakingContract, "maxWithdrawalPerDay()"),
     ]);
 
   return {
     adminFeeBps: Number(adminFeeBps),
     swapFeeBps: Number(swapFeeBps),
     ecosystemFeeBps: Number(ecosystemFeeBps),
-    maxWithdrawalPerDay: ethers.formatEther(maxWithdrawalPerDay),
+    maxWithdrawalPerDay:
+      maxWithdrawalRaw !== null ? ethers.formatEther(maxWithdrawalRaw) : null,
     coolingPeriod: Number(coolingPeriod),
   };
 }

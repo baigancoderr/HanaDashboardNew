@@ -9,6 +9,7 @@ const pageTitles = {
   "/dashboard": "Dashboard Overview",
   // "/dashboard/packages": "Packages",
   // "/dashboard/roi": "ROI & Income",
+  "/dashboard/direct-income": "Direct Income",
   "/dashboard/levels": "Level Income",
   "/dashboard/ranks": "Rank Incentives",
   "/dashboard/dao": "DAO Partner Program",

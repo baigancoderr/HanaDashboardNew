@@ -75,7 +75,10 @@ export default function Withdrawals() {
     ? (isReducedFee ? 1000 : standardFeeBps) / 100
     : 0;
   const netAmount = Math.max(0, numAmount * (1 - feePercent / 100));
-  const maxWithdrawal = Number(withdrawalConfig?.maxWithdrawalPerDay || 0);
+  const maxWithdrawal =
+    withdrawalConfig?.maxWithdrawalPerDay != null
+      ? Number(withdrawalConfig.maxWithdrawalPerDay)
+      : null;
   const standardFeePercent = standardFeeBps / 100;
   const adminFeePercent = (withdrawalConfig?.adminFeeBps || 0) / 100;
   const daoFeePercent = Math.max(0, standardFeePercent - adminFeePercent);
@@ -90,7 +93,7 @@ export default function Withdrawals() {
       setErrorMsg("Withdrawal rules could not be loaded from the staking contract.");
       return;
     }
-    if (numAmount > maxWithdrawal) {
+    if (maxWithdrawal !== null && numAmount > maxWithdrawal) {
       setErrorMsg(`Maximum withdrawal per request is ${maxWithdrawal} USDT`);
       return;
     }
@@ -172,8 +175,8 @@ export default function Withdrawals() {
         <StatCard
           icon={Wallet}
           label="Max Per Request"
-          value={withdrawalConfig ? `$${maxWithdrawal.toLocaleString()}` : "Unavailable"}
-          sub="Max per request"
+          value={maxWithdrawal !== null ? `$${maxWithdrawal.toLocaleString()}` : "No Limit"}
+          sub={maxWithdrawal !== null ? "Max per request" : "Not capped on-chain"}
           color="gold"
         />
       </div>

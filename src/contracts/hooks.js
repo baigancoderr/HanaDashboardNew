@@ -114,7 +114,10 @@ export function useUserData(address) {
         HANA_STAKING_ABI,
         provider
       );
-      const data = await staking.users(normalizedAddr);
+      const [data, openLevelsRaw] = await Promise.all([
+        staking.users(normalizedAddr),
+        staking.getOpenLevels(normalizedAddr).catch(() => 0n),
+      ]);
 
       setUser({
         referrer: data[0],
@@ -138,6 +141,7 @@ export function useUserData(address) {
         lastWithdrawalTime: Number(data[10] || 0n),
         validDirects: Number(data[11] || 0n),
         extraOpenLevels: Number(data[12] || 0n),
+        openLevels: Number(openLevelsRaw || 0n),
         isLeader: Boolean(data[13]),
         isDAO: Boolean(data[14]),
         daoJoinTime: Number(data[15] || 0n),
@@ -164,6 +168,27 @@ const txSenderCache = new Map();
 const txStakeCache = new Map();
 
 /**
+ * Query a block range with automatic halving fallback if an RPC rejects large ranges
+ */
+async function queryFilterRange(contract, filter, start, end, minSpan = 5000) {
+  try {
+    return await contract.queryFilter(filter, start, end);
+  } catch (err) {
+    const span = end - start;
+    if (span > minSpan) {
+      const mid = start + Math.floor(span / 2);
+      const [left, right] = await Promise.all([
+        queryFilterRange(contract, filter, start, mid, minSpan),
+        queryFilterRange(contract, filter, mid + 1, end, minSpan),
+      ]);
+      return [...left, ...right];
+    }
+    console.warn(`Query logs chunk [${start} - ${end}] failed:`, err);
+    return [];
+  }
+}
+
+/**
  * Safely query contract logs in bounded chunks to prevent RPC batch/range rate limits
  */
 async function fetchLogsInChunks(
@@ -183,22 +208,65 @@ async function fetchLogsInChunks(
   }
 
   const allEvents = [];
-  const concurrency = 8;
+  const concurrency = 6;
   for (let index = 0; index < ranges.length; index += concurrency) {
     const batch = await Promise.all(
-      ranges.slice(index, index + concurrency).map(async ([start, end]) => {
-        try {
-          return await contract.queryFilter(filter, start, end);
-        } catch (err) {
-          console.warn(`Query logs chunk [${start} - ${end}] failed:`, err);
-          return [];
-        }
-      }),
+      ranges
+        .slice(index, index + concurrency)
+        .map(([start, end]) => queryFilterRange(contract, filter, start, end)),
     );
     allEvents.push(...batch.flat());
   }
 
   return allEvents;
+}
+
+async function populateBlockTimestamps(provider, events) {
+  const blockNumbers = [...new Set(events.map((e) => e.blockNumber))];
+  await Promise.all(
+    blockNumbers.map(async (bNum) => {
+      if (!blockCache.has(bNum)) {
+        try {
+          const b = await provider.getBlock(bNum);
+          if (b?.timestamp) {
+            blockCache.set(bNum, Number(b.timestamp));
+          }
+        } catch (err) {
+          console.warn("Could not fetch block timestamp:", err);
+        }
+      }
+    }),
+  );
+}
+
+async function populateTxSenders(provider, events) {
+  const txHashes = [...new Set(events.map((e) => e.transactionHash))];
+  await Promise.all(
+    txHashes.map(async (hash) => {
+      if (!txSenderCache.has(hash)) {
+        try {
+          const tx = await provider.getTransaction(hash);
+          if (tx?.from) {
+            txSenderCache.set(hash, tx.from);
+          }
+        } catch (err) {
+          console.warn("Could not fetch tx sender:", err);
+        }
+      }
+    }),
+  );
+}
+
+function formatEventDate(timestamp, blockNumber) {
+  return timestamp
+    ? new Date(timestamp * 1000).toLocaleString("en-US", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : `Block #${blockNumber}`;
 }
 
 /**
@@ -1244,41 +1312,35 @@ export function useLevelIncomeHistory(address) {
         provider,
       );
       const currentBlock = await provider.getBlockNumber();
-      const filter = staking.filters.LevelIncomeAllotted(null, normalizedAddr);
-      const events = await fetchLogsInChunks(
-        staking,
-        filter,
-        Math.max(0, CONTRACT_START_BLOCK),
-        currentBlock,
-      );
+      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
+      const levelFilter = staking.filters.LevelIncomeAllotted(null, normalizedAddr);
+      const incomeFilter = staking.filters.IncomeAllotted(normalizedAddr);
 
-      const blockNumbers = [...new Set(events.map((event) => event.blockNumber))];
-      await Promise.all(
-        blockNumbers.map(async (blockNumber) => {
-          if (!blockCache.has(blockNumber)) {
-            try {
-              const block = await provider.getBlock(blockNumber);
-              if (block?.timestamp) {
-                blockCache.set(blockNumber, Number(block.timestamp));
-              }
-            } catch (blockError) {
-              console.warn("Could not fetch block timestamp:", blockError);
-            }
-          }
-        }),
-      );
+      const [levelEvents, incomeEvents] = await Promise.all([
+        fetchLogsInChunks(staking, levelFilter, fromBlock, currentBlock),
+        fetchLogsInChunks(staking, incomeFilter, fromBlock, currentBlock),
+      ]);
+
+      const levelTxSet = new Set(levelEvents.map((e) => e.transactionHash));
+      const fallbackLevelIncomeEvents = incomeEvents.filter((event) => {
+        const incomeType = (event.args?.[3] ?? event.args?.incomeType ?? "")
+          .toString()
+          .toLowerCase();
+        return incomeType.includes("level") && !levelTxSet.has(event.transactionHash);
+      });
+
+      const relevantEvents = [...levelEvents, ...fallbackLevelIncomeEvents];
+      await Promise.all([
+        populateBlockTimestamps(provider, relevantEvents),
+        populateTxSenders(provider, fallbackLevelIncomeEvents),
+      ]);
 
       let sumUsdt = 0;
       let sumHana = 0;
-      const parsedIncome = events.map((event) => {
-        const fromAddress = event.args?.[0] ?? event.args?.from;
-        const level = Number(event.args?.[2] ?? event.args?.level ?? 0n);
-        const usdtWei = event.args?.[3] ?? event.args?.usdtValue ?? 0n;
-        const hanaWei = event.args?.[4] ?? event.args?.hanaAllotted ?? 0n;
+      const buildLevelIncomeRow = ({ fromAddress, level, usdtWei, hanaWei, event }) => {
         const usdtNumber = Number(formatEther(usdtWei));
         const hanaNumber = Number(formatEther(hanaWei));
         const timestamp = blockCache.get(event.blockNumber) || null;
-
         sumUsdt += usdtNumber;
         sumHana += hanaNumber;
 
@@ -1291,24 +1353,42 @@ export function useLevelIncomeHistory(address) {
             ? getExplorerAddressUrl(fromAddress)
             : null,
           level,
+          usdtNumber,
+          hanaNumber,
           usdtFormatted: usdtNumber.toFixed(2),
           hanaFormatted: hanaNumber.toFixed(2),
           txHash: event.transactionHash,
           txShort: `${event.transactionHash.slice(0, 8)}...${event.transactionHash.slice(-6)}`,
           blockNumber: event.blockNumber,
           explorerUrl: getExplorerTxUrl(event.transactionHash),
-          dateFormatted: timestamp
-            ? new Date(timestamp * 1000).toLocaleString("en-US", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : `Block #${event.blockNumber}`,
+          timestamp,
+          dateFormatted: formatEventDate(timestamp, event.blockNumber),
         };
+      };
+
+      const parsedPrimary = levelEvents.map((event) =>
+        buildLevelIncomeRow({
+          fromAddress: event.args?.[0] ?? event.args?.from,
+          level: Number(event.args?.[2] ?? event.args?.level ?? 0n),
+          usdtWei: event.args?.[3] ?? event.args?.usdtValue ?? 0n,
+          hanaWei: event.args?.[4] ?? event.args?.hanaAllotted ?? 0n,
+          event,
+        }),
+      );
+
+      const parsedFallback = fallbackLevelIncomeEvents.map((event) => {
+        const incomeType = (event.args?.[3] ?? event.args?.incomeType ?? "").toString();
+        const levelMatch = incomeType.match(/(\d+)/);
+        return buildLevelIncomeRow({
+          fromAddress: txSenderCache.get(event.transactionHash) || null,
+          level: levelMatch ? Number(levelMatch[1]) : 0,
+          usdtWei: event.args?.[1] ?? event.args?.usdtValue ?? 0n,
+          hanaWei: event.args?.[2] ?? event.args?.hanaAllotted ?? 0n,
+          event,
+        });
       });
 
+      const parsedIncome = [...parsedPrimary, ...parsedFallback];
       parsedIncome.sort((a, b) => b.blockNumber - a.blockNumber);
       setIncomeHistory(parsedIncome);
       setTotalUsdt(sumUsdt);
