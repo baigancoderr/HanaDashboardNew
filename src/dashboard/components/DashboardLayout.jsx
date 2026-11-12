@@ -20,6 +20,7 @@ const pageTitles = {
   "/dashboard/settings": "Settings",
   "/dashboard/history/referral-income": "Referral Income History",
   "/dashboard/history/level-income": "Level Income History",
+  "/dashboard/history/income": "Income & Transaction History",
 };
 
 export default function DashboardLayout() {

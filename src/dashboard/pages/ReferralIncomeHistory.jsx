@@ -3,6 +3,7 @@ import { Coins, ExternalLink, Loader2, RefreshCw, Users } from "lucide-react";
 import StatCard from "../components/StatCard";
 import SectionCard from "../components/SectionCard";
 import { useReferralHistory } from "../../contracts/hooks";
+import { getExplorerAddressUrl } from "../../contracts/config";
 
 export default function ReferralIncomeHistory() {
   const { address } = useAppKitAccount({ namespace: "eip155" });
@@ -43,7 +44,7 @@ export default function ReferralIncomeHistory() {
 
       <SectionCard
         title="Referral Income History"
-        subtitle="Direct referral income recorded on-chain"
+        subtitle="Direct referral income recorded on-chain — with staker address and stake amount"
         action={
           <button
             type="button"
@@ -63,7 +64,7 @@ export default function ReferralIncomeHistory() {
         ) : isLoading ? (
           <div className="flex items-center justify-center py-10 text-[#FFB51D]">
             <Loader2 size={20} className="mr-2 animate-spin" />
-            <span className="text-xs">Loading referral income history...</span>
+            <span className="text-xs">Loading referral income history…</span>
           </div>
         ) : error ? (
           <p className="rounded-lg border border-red-400/20 bg-red-400/[0.05] p-4 text-sm text-red-300" role="alert">
@@ -74,16 +75,18 @@ export default function ReferralIncomeHistory() {
             <Users size={26} className="mx-auto mb-2 text-neutral-500" />
             <p className="text-sm font-medium text-white">No referral income yet</p>
             <p className="mt-1 text-xs text-neutral-400">
-              On-chain referral income events will appear here.
+              On-chain referral income events for your wallet will appear here.
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] text-left text-xs">
+            <table className="w-full min-w-[820px] text-left text-xs">
               <thead>
                 <tr className="border-b border-[#222] text-[11px] uppercase tracking-wider text-[#737373]">
-                  <th className="pb-3 font-semibold">Referred Member</th>
-                  <th className="pb-3 font-semibold">USDT Income</th>
+                  <th className="pb-3 font-semibold">Staker (Who Staked)</th>
+                  <th className="pb-3 font-semibold">Stake Amount</th>
+                  <th className="pb-3 font-semibold">Package</th>
+                  <th className="pb-3 font-semibold">Your Income (5%)</th>
                   <th className="pb-3 font-semibold">HANA Credited</th>
                   <th className="pb-3 font-semibold">Date &amp; Time</th>
                   <th className="pb-3 text-right font-semibold">Transaction</th>
@@ -95,6 +98,7 @@ export default function ReferralIncomeHistory() {
                     key={`${row.txHash}-${index}`}
                     className="transition hover:bg-white/[0.02]"
                   >
+                    {/* Staker address */}
                     <td className="py-3">
                       {row.stakerAddress ? (
                         <a
@@ -106,16 +110,46 @@ export default function ReferralIncomeHistory() {
                           {row.stakerShort}
                         </a>
                       ) : (
-                        <span className="text-neutral-400">Referral member</span>
+                        <span className="text-neutral-400">Referred Member</span>
                       )}
                     </td>
+
+                    {/* Stake amount */}
+                    <td className="py-3">
+                      {row.stakeAmountFormatted ? (
+                        <span className="font-semibold text-white">
+                          ${row.stakeAmountFormatted} USDT
+                        </span>
+                      ) : (
+                        <span className="text-neutral-500">—</span>
+                      )}
+                    </td>
+
+                    {/* Package name */}
+                    <td className="py-3">
+                      {row.stakePackageName ? (
+                        <span className="rounded-md border border-[#FFB51D]/20 bg-[#FFB51D]/5 px-2 py-0.5 text-[11px] font-semibold text-[#FFB51D]">
+                          {row.stakePackageName}
+                        </span>
+                      ) : (
+                        <span className="text-neutral-500">—</span>
+                      )}
+                    </td>
+
+                    {/* Income earned (5%) */}
                     <td className="py-3 font-semibold text-green-400">
                       +${row.usdtFormatted} USDT
                     </td>
+
+                    {/* HANA credited */}
                     <td className="py-3 font-semibold text-[#FFB51D]">
                       +{row.hanaFormatted} HANA
                     </td>
+
+                    {/* Date */}
                     <td className="py-3 text-neutral-400">{row.dateFormatted}</td>
+
+                    {/* Tx link */}
                     <td className="py-3 text-right">
                       <a
                         href={row.explorerUrl}

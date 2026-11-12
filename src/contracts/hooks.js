@@ -8,6 +8,7 @@ import { bscTestnet } from "@reown/appkit/networks";
 import {
   Contract,
   BrowserProvider,
+  Interface,
   parseEther,
   formatEther,
   isAddress,
@@ -159,6 +160,8 @@ export function useUserData(address) {
 // Shared in-memory caches to avoid redundant RPC calls across hooks
 const blockCache = new Map();
 const txSenderCache = new Map();
+// txHash → { staker: address, stakeAmount: BigInt } for direct income enrichment
+const txStakeCache = new Map();
 
 /**
  * Safely query contract logs in bounded chunks to prevent RPC batch/range rate limits
@@ -1050,18 +1053,43 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
       );
 
       // For direct income events, fetch the transaction sender (the staker who generated commission)
+      // Also fetch Staked events from same tx hashes to get stake amount
       const txHashes = [...new Set(incomeEvents.map((e) => e.transactionHash))];
+
+      // Fetch tx receipts to get staker address + Staked event logs (for stake amount)
       await Promise.all(
         txHashes.map(async (hash) => {
-          if (!txSenderCache.has(hash)) {
-            try {
-              const tx = await provider.getTransaction(hash);
-              if (tx?.from) {
-                txSenderCache.set(hash, tx.from);
+          const needSender = !txSenderCache.has(hash);
+          const needStake  = !txStakeCache.has(hash);
+          if (!needSender && !needStake) return;
+          try {
+            const [tx, receipt] = await Promise.all([
+              needSender ? provider.getTransaction(hash) : Promise.resolve(null),
+              needStake  ? provider.getTransactionReceipt(hash) : Promise.resolve(null),
+            ]);
+            if (tx?.from) txSenderCache.set(hash, tx.from);
+            if (receipt) {
+              // Parse Staked event logs from the receipt
+              const stakedIface = new Interface(
+                HANA_STAKING_ABI.filter((x) => x.name === "Staked")
+              );
+              for (const log of receipt.logs) {
+                try {
+                  const parsed = stakedIface.parseLog(log);
+                  if (parsed?.name === "Staked") {
+                    txStakeCache.set(hash, {
+                      staker:      parsed.args[0],
+                      stakeAmount: parsed.args[2], // BigInt wei
+                      packageId:   Number(parsed.args[1]),
+                      stakeIndex:  Number(parsed.args[3]),
+                    });
+                    break;
+                  }
+                } catch {}
               }
-            } catch (err) {
-              console.warn("Could not fetch tx sender:", err);
             }
+          } catch (err) {
+            console.warn("Could not fetch tx details:", err);
           }
         })
       );
@@ -1084,6 +1112,9 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
 
           const timestamp = blockCache.get(e.blockNumber) || null;
           const stakerAddress = txSenderCache.get(e.transactionHash) || null;
+          const stakeInfo    = txStakeCache.get(e.transactionHash) || null;
+          const stakeAmountNum = stakeInfo ? Number(formatEther(stakeInfo.stakeAmount)) : null;
+          const pkg = stakeInfo ? DEFAULT_PACKAGES.find((p) => p.id === stakeInfo.packageId) : null;
 
           return {
             type: "direct",
@@ -1098,6 +1129,12 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
               ? `${stakerAddress.slice(0, 6)}...${stakerAddress.slice(-4)}`
               : "Referred Member",
             stakerExplorerUrl: stakerAddress ? getExplorerAddressUrl(stakerAddress) : null,
+            // Stake details that generated this direct income
+            stakeAmount: stakeInfo?.stakeAmount ?? null,
+            stakeAmountFormatted: stakeAmountNum !== null ? stakeAmountNum.toFixed(2) : null,
+            stakePackageId: stakeInfo?.packageId ?? null,
+            stakePackageName: pkg?.name ?? null,
+            stakeIndex: stakeInfo?.stakeIndex ?? null,
             txHash: e.transactionHash,
             txShort: `${e.transactionHash.slice(0, 8)}...${e.transactionHash.slice(-6)}`,
             blockNumber: e.blockNumber,
@@ -1299,5 +1336,421 @@ export function useLevelIncomeHistory(address) {
     isLoading,
     error,
     refetch: fetchLevelIncomeHistory,
+  };
+}
+
+/**
+ * Read on-chain ROI Claim history from ROIClaimed events
+ * Event: ROIClaimed(address indexed user, uint256 stakeIndex, uint256 usdtValue, uint256 hanaAllotted)
+ */
+export function useROIHistory(address) {
+  const [roiHistory, setRoiHistory] = useState([]);
+  const [totalUsdt, setTotalUsdt] = useState(0);
+  const [totalHana, setTotalHana] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const isAddrValid = Boolean(address && isAddress(address));
+  const normalizedAddr = isAddrValid ? getAddress(address) : null;
+
+  const fetchRoiHistory = useCallback(async () => {
+    if (!normalizedAddr) {
+      setRoiHistory([]);
+      setTotalUsdt(0);
+      setTotalHana(0);
+      setError("");
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+    try {
+      const provider = getReadOnlyProvider();
+      const staking = new Contract(
+        CONTRACT_ADDRESSES.stakingContract,
+        HANA_STAKING_ABI,
+        provider
+      );
+
+      const currentBlock = await provider.getBlockNumber();
+      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
+
+      const filter = staking.filters.ROIClaimed(normalizedAddr);
+      const events = await fetchLogsInChunks(staking, filter, fromBlock, currentBlock).catch(() => []);
+
+      // Cache block timestamps
+      const blockNumbers = [...new Set(events.map((e) => e.blockNumber))];
+      await Promise.all(
+        blockNumbers.map(async (bNum) => {
+          if (!blockCache.has(bNum)) {
+            try {
+              const b = await provider.getBlock(bNum);
+              if (b?.timestamp) blockCache.set(bNum, Number(b.timestamp));
+            } catch {}
+          }
+        })
+      );
+
+      let sumUsdt = 0;
+      let sumHana = 0;
+
+      const parsed = events.map((e) => {
+        const stakeIndex = Number(e.args?.[1] ?? e.args?.stakeIndex ?? 0);
+        const usdtWei = e.args?.[2] ?? e.args?.usdtValue ?? 0n;
+        const hanaWei = e.args?.[3] ?? e.args?.hanaAllotted ?? 0n;
+        const usdtNum = Number(formatEther(usdtWei));
+        const hanaNum = Number(formatEther(hanaWei));
+        const timestamp = blockCache.get(e.blockNumber) || null;
+
+        sumUsdt += usdtNum;
+        sumHana += hanaNum;
+
+        const pkg = DEFAULT_PACKAGES[0]; // fallback; we don't have packageId in this event
+
+        return {
+          stakeIndex,
+          stakeDisplayId: `#S-${stakeIndex + 1}`,
+          usdtValue: usdtWei,
+          usdtFormatted: usdtNum.toFixed(2),
+          usdtNumber: usdtNum,
+          hanaAllotted: hanaWei,
+          hanaFormatted: hanaNum.toFixed(4),
+          hanaNumber: hanaNum,
+          txHash: e.transactionHash,
+          txShort: `${e.transactionHash.slice(0, 8)}...${e.transactionHash.slice(-6)}`,
+          blockNumber: e.blockNumber,
+          explorerUrl: getExplorerTxUrl(e.transactionHash),
+          timestamp,
+          dateFormatted: timestamp
+            ? new Date(timestamp * 1000).toLocaleString("en-US", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : `Block #${e.blockNumber}`,
+        };
+      });
+
+      parsed.sort((a, b) => b.blockNumber - a.blockNumber);
+      setRoiHistory(parsed);
+      setTotalUsdt(sumUsdt);
+      setTotalHana(sumHana);
+    } catch (err) {
+      console.warn("Could not fetch ROI history:", err);
+      setError(err instanceof Error ? err.message : "Could not load ROI history.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [normalizedAddr]);
+
+  useEffect(() => {
+    fetchRoiHistory();
+  }, [fetchRoiHistory]);
+
+  return { roiHistory, totalUsdt, totalHana, isLoading, error, refetch: fetchRoiHistory };
+}
+
+/**
+ * Combined income history hook — merges:
+ *  - ROIClaimed events (roi income)
+ *  - IncomeAllotted events (direct / roi income credited)
+ *  - LevelIncomeAllotted events (level income)
+ *  - Staked events (staking history)
+ *
+ * Returns a unified sorted log and per-category summaries.
+ */
+export function useIncomeHistory(address) {
+  const [allEvents, setAllEvents] = useState([]);
+  const [roiEvents, setRoiEvents] = useState([]);
+  const [directEvents, setDirectEvents] = useState([]);
+  const [levelEvents, setLevelEvents] = useState([]);
+  const [stakingEvents, setStakingEvents] = useState([]);
+
+  const [totals, setTotals] = useState({
+    roiUsdt: 0, roiHana: 0,
+    directUsdt: 0, directHana: 0,
+    levelUsdt: 0, levelHana: 0,
+    stakedUsdt: 0,
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const isAddrValid = Boolean(address && isAddress(address));
+  const normalizedAddr = isAddrValid ? getAddress(address) : null;
+
+  const fetchAll = useCallback(async () => {
+    if (!normalizedAddr) {
+      setAllEvents([]); setRoiEvents([]); setDirectEvents([]);
+      setLevelEvents([]); setStakingEvents([]);
+      setTotals({ roiUsdt: 0, roiHana: 0, directUsdt: 0, directHana: 0, levelUsdt: 0, levelHana: 0, stakedUsdt: 0 });
+      setError(""); setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const provider = getReadOnlyProvider();
+      const staking = new Contract(CONTRACT_ADDRESSES.stakingContract, HANA_STAKING_ABI, provider);
+
+      const currentBlock = await provider.getBlockNumber();
+      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
+
+      // Fire all 4 event queries in parallel
+      const [roiEvts, incomeEvts, levelEvts, stakedEvts] = await Promise.all([
+        fetchLogsInChunks(staking, staking.filters.ROIClaimed(normalizedAddr), fromBlock, currentBlock).catch(() => []),
+        fetchLogsInChunks(staking, staking.filters.IncomeAllotted(normalizedAddr), fromBlock, currentBlock).catch(() => []),
+        fetchLogsInChunks(staking, staking.filters.LevelIncomeAllotted(null, normalizedAddr), fromBlock, currentBlock).catch(() => []),
+        fetchLogsInChunks(staking, staking.filters.Staked(normalizedAddr), fromBlock, currentBlock).catch(() => []),
+      ]);
+
+      // Cache block timestamps for all events at once
+      const allRaw = [...roiEvts, ...incomeEvts, ...levelEvts, ...stakedEvts];
+      const blockNumbers = [...new Set(allRaw.map((e) => e.blockNumber))];
+      await Promise.all(
+        blockNumbers.map(async (bNum) => {
+          if (!blockCache.has(bNum)) {
+            try {
+              const b = await provider.getBlock(bNum);
+              if (b?.timestamp) blockCache.set(bNum, Number(b.timestamp));
+            } catch {}
+          }
+        })
+      );
+
+      const fmt = (ts) =>
+        ts
+          ? new Date(ts * 1000).toLocaleString("en-US", {
+              day: "2-digit", month: "short", year: "numeric",
+              hour: "2-digit", minute: "2-digit",
+            })
+          : null;
+
+      // For direct income events, fetch tx receipts to get staker address + stake amount
+      const directIncomeEvts = incomeEvts.filter((e) => {
+        const type = (e.args?.[3] ?? e.args?.incomeType ?? "").toString().toLowerCase();
+        return type === "direct";
+      });
+      const directTxHashes = [...new Set(directIncomeEvts.map((e) => e.transactionHash))];
+      const stakedIface = new Interface(HANA_STAKING_ABI.filter((x) => x.name === "Staked"));
+      await Promise.all(
+        directTxHashes.map(async (hash) => {
+          const needSender = !txSenderCache.has(hash);
+          const needStake  = !txStakeCache.has(hash);
+          if (!needSender && !needStake) return;
+          try {
+            const [tx, receipt] = await Promise.all([
+              needSender ? provider.getTransaction(hash)        : Promise.resolve(null),
+              needStake  ? provider.getTransactionReceipt(hash) : Promise.resolve(null),
+            ]);
+            if (tx?.from) txSenderCache.set(hash, tx.from);
+            if (receipt) {
+              for (const log of receipt.logs) {
+                try {
+                  const parsed = stakedIface.parseLog(log);
+                  if (parsed?.name === "Staked") {
+                    txStakeCache.set(hash, {
+                      staker:      parsed.args[0],
+                      stakeAmount: parsed.args[2],
+                      packageId:   Number(parsed.args[1]),
+                      stakeIndex:  Number(parsed.args[3]),
+                    });
+                    break;
+                  }
+                } catch {}
+              }
+            }
+          } catch {}
+        })
+      );
+
+      // --- ROIClaimed events ---
+      let roiUsdtSum = 0, roiHanaSum = 0;
+      const parsedRoi = roiEvts.map((e) => {
+        const stakeIndex = Number(e.args?.[1] ?? e.args?.stakeIndex ?? 0);
+        const usdtWei = e.args?.[2] ?? e.args?.usdtValue ?? 0n;
+        const hanaWei = e.args?.[3] ?? e.args?.hanaAllotted ?? 0n;
+        const usdtNum = Number(formatEther(usdtWei));
+        const hanaNum = Number(formatEther(hanaWei));
+        const ts = blockCache.get(e.blockNumber) || null;
+        roiUsdtSum += usdtNum;
+        roiHanaSum += hanaNum;
+        return {
+          category: "roi",
+          label: "ROI Claimed",
+          stakeIndex,
+          stakeDisplayId: `#S-${stakeIndex + 1}`,
+          usdtFormatted: usdtNum.toFixed(2),
+          hanaFormatted: hanaNum.toFixed(4),
+          usdtNumber: usdtNum,
+          hanaNumber: hanaNum,
+          txHash: e.transactionHash,
+          txShort: `${e.transactionHash.slice(0, 8)}...${e.transactionHash.slice(-6)}`,
+          blockNumber: e.blockNumber,
+          explorerUrl: getExplorerTxUrl(e.transactionHash),
+          timestamp: ts,
+          dateFormatted: fmt(ts) ?? `Block #${e.blockNumber}`,
+        };
+      });
+
+      // --- IncomeAllotted events (direct & roi credited) ---
+      let directUsdtSum = 0, directHanaSum = 0;
+      const parsedDirect = incomeEvts
+        .filter((e) => {
+          const type = (e.args?.[3] ?? e.args?.incomeType ?? "").toString().toLowerCase();
+          return type === "direct";
+        })
+        .map((e) => {
+          const usdtWei = e.args?.[1] ?? e.args?.usdtValue ?? 0n;
+          const hanaWei = e.args?.[2] ?? e.args?.hanaAllotted ?? 0n;
+          const usdtNum = Number(formatEther(usdtWei));
+          const hanaNum = Number(formatEther(hanaWei));
+          const ts = blockCache.get(e.blockNumber) || null;
+          directUsdtSum += usdtNum;
+          directHanaSum += hanaNum;
+
+          const stakerAddress  = txSenderCache.get(e.transactionHash) || null;
+          const stakeInfo      = txStakeCache.get(e.transactionHash) || null;
+          const stakeAmountNum = stakeInfo ? Number(formatEther(stakeInfo.stakeAmount)) : null;
+          const pkg = stakeInfo ? DEFAULT_PACKAGES.find((p) => p.id === stakeInfo.packageId) : null;
+
+          return {
+            category: "direct",
+            label: "Direct Income",
+            stakerAddress,
+            stakerShort: stakerAddress
+              ? `${stakerAddress.slice(0, 6)}...${stakerAddress.slice(-4)}`
+              : null,
+            stakerExplorerUrl: stakerAddress ? getExplorerAddressUrl(stakerAddress) : null,
+            stakeAmountFormatted: stakeAmountNum !== null ? stakeAmountNum.toFixed(2) : null,
+            stakePackageName: pkg?.name ?? null,
+            stakeIndex: stakeInfo?.stakeIndex ?? null,
+            usdtFormatted: usdtNum.toFixed(2),
+            hanaFormatted: hanaNum.toFixed(4),
+            usdtNumber: usdtNum,
+            hanaNumber: hanaNum,
+            txHash: e.transactionHash,
+            txShort: `${e.transactionHash.slice(0, 8)}...${e.transactionHash.slice(-6)}`,
+            blockNumber: e.blockNumber,
+            explorerUrl: getExplorerTxUrl(e.transactionHash),
+            timestamp: ts,
+            dateFormatted: fmt(ts) ?? `Block #${e.blockNumber}`,
+          };
+        });
+
+      // --- LevelIncomeAllotted events ---
+      let levelUsdtSum = 0, levelHanaSum = 0;
+      const parsedLevel = levelEvts.map((e) => {
+        const fromAddress = e.args?.[0] ?? e.args?.from;
+        const level = Number(e.args?.[2] ?? e.args?.level ?? 0n);
+        const usdtWei = e.args?.[3] ?? e.args?.usdtValue ?? 0n;
+        const hanaWei = e.args?.[4] ?? e.args?.hanaAllotted ?? 0n;
+        const usdtNum = Number(formatEther(usdtWei));
+        const hanaNum = Number(formatEther(hanaWei));
+        const ts = blockCache.get(e.blockNumber) || null;
+        levelUsdtSum += usdtNum;
+        levelHanaSum += hanaNum;
+        return {
+          category: "level",
+          label: `Level ${level} Income`,
+          fromAddress,
+          fromShort: fromAddress ? `${fromAddress.slice(0, 6)}...${fromAddress.slice(-4)}` : "Network",
+          fromExplorerUrl: fromAddress ? getExplorerAddressUrl(fromAddress) : null,
+          level,
+          usdtFormatted: usdtNum.toFixed(2),
+          hanaFormatted: hanaNum.toFixed(4),
+          usdtNumber: usdtNum,
+          hanaNumber: hanaNum,
+          txHash: e.transactionHash,
+          txShort: `${e.transactionHash.slice(0, 8)}...${e.transactionHash.slice(-6)}`,
+          blockNumber: e.blockNumber,
+          explorerUrl: getExplorerTxUrl(e.transactionHash),
+          timestamp: ts,
+          dateFormatted: fmt(ts) ?? `Block #${e.blockNumber}`,
+        };
+      });
+
+      // --- Staked events ---
+      let stakedUsdtSum = 0;
+      const parsedStaked = stakedEvts.map((e) => {
+        const packageId = Number(e.args?.[1] ?? e.args?.packageId ?? 0);
+        const amountWei = e.args?.[2] ?? e.args?.amount ?? 0n;
+        const stakeIndex = Number(e.args?.[3] ?? e.args?.stakeIndex ?? 0);
+        const amountNum = Number(formatEther(amountWei));
+        const pkg = DEFAULT_PACKAGES.find((p) => p.id === packageId) || { name: `Package #${packageId}` };
+        const ts = blockCache.get(e.blockNumber) || null;
+        stakedUsdtSum += amountNum;
+        return {
+          category: "staked",
+          label: `Staked – ${pkg.name}`,
+          packageId,
+          packageName: pkg.name,
+          stakeIndex,
+          stakeDisplayId: `#S-${stakeIndex + 1}`,
+          usdtFormatted: amountNum.toFixed(2),
+          hanaFormatted: "-",
+          usdtNumber: amountNum,
+          hanaNumber: 0,
+          txHash: e.transactionHash,
+          txShort: `${e.transactionHash.slice(0, 8)}...${e.transactionHash.slice(-6)}`,
+          blockNumber: e.blockNumber,
+          explorerUrl: getExplorerTxUrl(e.transactionHash),
+          timestamp: ts,
+          dateFormatted: fmt(ts) ?? `Block #${e.blockNumber}`,
+        };
+      });
+
+      // Sort each category newest-first
+      const sortByBlock = (a, b) => b.blockNumber - a.blockNumber;
+      parsedRoi.sort(sortByBlock);
+      parsedDirect.sort(sortByBlock);
+      parsedLevel.sort(sortByBlock);
+      parsedStaked.sort(sortByBlock);
+
+      // Unified log — combine all categories and re-sort
+      const unified = [...parsedRoi, ...parsedDirect, ...parsedLevel, ...parsedStaked];
+      unified.sort(sortByBlock);
+
+      setRoiEvents(parsedRoi);
+      setDirectEvents(parsedDirect);
+      setLevelEvents(parsedLevel);
+      setStakingEvents(parsedStaked);
+      setAllEvents(unified);
+      setTotals({
+        roiUsdt: roiUsdtSum,
+        roiHana: roiHanaSum,
+        directUsdt: directUsdtSum,
+        directHana: directHanaSum,
+        levelUsdt: levelUsdtSum,
+        levelHana: levelHanaSum,
+        stakedUsdt: stakedUsdtSum,
+      });
+    } catch (err) {
+      console.warn("Could not fetch income history:", err);
+      setError(err instanceof Error ? err.message : "Could not load income history.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [normalizedAddr]);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
+
+  return {
+    allEvents,
+    roiEvents,
+    directEvents,
+    levelEvents,
+    stakingEvents,
+    totals,
+    isLoading,
+    error,
+    refetch: fetchAll,
   };
 }
