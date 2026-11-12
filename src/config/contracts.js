@@ -11,10 +11,10 @@ export const USE_MAINNET = false;
 // ======================== RPC URLs ========================
 
 const DEFAULT_BSC_TESTNET_RPCS = [
-  "https://bsc-testnet-rpc.publicnode.com",
+  "https://bsc-testnet.publicnode.com",
+  "https://bnb-testnet.api.onfinality.io/public",
   "https://bsc-testnet.bnbchain.org",
   "https://bsc-testnet.drpc.org",
-  "https://bnb-testnet.api.onfinality.io/public",
   "https://data-seed-prebsc-1-s1.binance.org:8545",
   "https://data-seed-prebsc-2-s1.binance.org:8545",
   "https://data-seed-prebsc-1-s2.binance.org:8545",

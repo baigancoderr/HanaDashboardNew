@@ -19,6 +19,7 @@ import {
   CONTRACT_ADDRESSES,
   ZERO_ADDRESS,
   getReadOnlyProvider,
+  getArchiveProvider,
   CONTRACT_START_BLOCK,
   DEFAULT_PACKAGES,
   getExplorerTxUrl,
@@ -164,61 +165,509 @@ export function useUserData(address) {
 // Shared in-memory caches to avoid redundant RPC calls across hooks
 const blockCache = new Map();
 const txSenderCache = new Map();
-// txHash → { staker: address, stakeAmount: BigInt } for direct income enrichment
+// txHashLower → { staker, stakeAmount, packageId, stakeIndex }
 const txStakeCache = new Map();
+// txHashLower → { claimer, stakeIndex, usdtValue, hanaAllotted }
+const txRoiClaimCache = new Map();
 
-/**
- * Query a block range with automatic halving fallback if an RPC rejects large ranges
- */
-async function queryFilterRange(contract, filter, start, end, minSpan = 5000) {
-  try {
-    return await contract.queryFilter(filter, start, end);
-  } catch (err) {
-    const span = end - start;
-    if (span > minSpan) {
-      const mid = start + Math.floor(span / 2);
-      const [left, right] = await Promise.all([
-        queryFilterRange(contract, filter, start, mid, minSpan),
-        queryFilterRange(contract, filter, mid + 1, end, minSpan),
-      ]);
-      return [...left, ...right];
+// ─── Unified Hybrid Contract Log Sync Store ──────────────────────────────────
+const stakingIface = new Interface(HANA_STAKING_ABI);
+const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v3_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
+const TAIL_BLOCK_SPAN = 49999;
+const ARCHIVE_CHUNK_SPAN = 9999; // 10,000 blocks inclusive (OnFinality max)
+const ARCHIVE_CHUNK_DELAY_MS = 700;
+
+const logSyncStore = {
+  initialized: false,
+  rawLogMap: new Map(), // `${txHashLower}:${logIndex}` -> raw parsed entry
+  parsedEvents: [], // sorted ascending by blockNumber, logIndex
+  historicalCursor: Math.max(0, CONTRACT_START_BLOCK - 1),
+  tailHead: 0,
+  lastTailSyncAt: 0,
+  hasCompletedInitialTail: false,
+  isSyncingHistory: false,
+  syncProgress: 0,
+  dataRevision: 0,
+  progressRevision: 0,
+  listeners: new Set(),
+  tailPromise: null,
+  archivePromise: null,
+};
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function notifyLogSyncListeners() {
+  logSyncStore.listeners.forEach((cb) => {
+    try {
+      cb({
+        dataRevision: logSyncStore.dataRevision,
+        progressRevision: logSyncStore.progressRevision,
+        isSyncingHistory: logSyncStore.isSyncingHistory,
+        syncProgress: logSyncStore.syncProgress,
+      });
+    } catch {}
+  });
+}
+
+function rebuildParsedEventsAndIndexes() {
+  const list = Array.from(logSyncStore.rawLogMap.values());
+  list.sort((a, b) =>
+    a.blockNumber !== b.blockNumber
+      ? a.blockNumber - b.blockNumber
+      : a.logIndex - b.logIndex
+  );
+  logSyncStore.parsedEvents = list;
+
+  // Populate cross-event tx caches in memory with zero extra RPC calls
+  for (const ev of list) {
+    const txLower = ev.transactionHash.toLowerCase();
+    if (ev.eventName === "Staked") {
+      txStakeCache.set(ev.transactionHash, {
+        staker: ev.args?.[0] ?? ev.args?.user,
+        packageId: Number(ev.args?.[1] ?? ev.args?.packageId ?? 0),
+        stakeAmount: ev.args?.[2] ?? ev.args?.amount ?? 0n,
+        stakeIndex: Number(ev.args?.[3] ?? ev.args?.stakeIndex ?? 0),
+      });
+      txStakeCache.set(txLower, txStakeCache.get(ev.transactionHash));
+      const stakerAddr = ev.args?.[0] ?? ev.args?.user;
+      if (stakerAddr) {
+        txSenderCache.set(ev.transactionHash, stakerAddr);
+      }
+    } else if (ev.eventName === "ROIClaimed") {
+      const info = {
+        claimer: ev.args?.[0] ?? ev.args?.user,
+        stakeIndex: Number(ev.args?.[1] ?? ev.args?.stakeIndex ?? 0),
+        usdtValue: ev.args?.[2] ?? ev.args?.usdtValue ?? 0n,
+        hanaAllotted: ev.args?.[3] ?? ev.args?.hanaAllotted ?? 0n,
+      };
+      txRoiClaimCache.set(ev.transactionHash, info);
+      txRoiClaimCache.set(txLower, info);
     }
-    console.warn(`Query logs chunk [${start} - ${end}] failed:`, err);
-    return [];
   }
 }
 
-/**
- * Safely query contract logs in bounded chunks to prevent RPC batch/range rate limits
- */
-async function fetchLogsInChunks(
-  contract,
-  filter,
+function mergeRawLogs(logs) {
+  let addedCount = 0;
+  for (const raw of logs || []) {
+    const txHash = raw.transactionHash ?? raw.h;
+    const blockNumber = Number(raw.blockNumber ?? raw.b ?? 0);
+    const logIndex = Number(raw.index ?? raw.logIndex ?? raw.i ?? 0);
+    const topics = raw.topics ?? raw.t;
+    const data = raw.data ?? raw.d;
+    if (!txHash || !topics || !topics.length) continue;
+
+    const key = `${txHash.toLowerCase()}:${logIndex}`;
+    if (logSyncStore.rawLogMap.has(key)) continue;
+
+    let parsed = null;
+    try {
+      parsed = stakingIface.parseLog({ topics, data });
+    } catch {
+      parsed = null;
+    }
+    if (!parsed) continue;
+
+    logSyncStore.rawLogMap.set(key, {
+      eventName: parsed.name,
+      args: parsed.args,
+      blockNumber,
+      transactionHash: txHash,
+      logIndex,
+      index: logIndex,
+      topics,
+      data,
+    });
+    addedCount += 1;
+  }
+
+  if (addedCount > 0) {
+    rebuildParsedEventsAndIndexes();
+  }
+  return addedCount;
+}
+
+function persistLogSyncStore() {
+  if (typeof window === "undefined") return;
+  try {
+    const payload = {
+      historicalCursor: logSyncStore.historicalCursor,
+      tailHead: logSyncStore.tailHead,
+      logs: Array.from(logSyncStore.rawLogMap.values()).map((ev) => ({
+        b: ev.blockNumber,
+        h: ev.transactionHash,
+        i: ev.logIndex,
+        t: ev.topics,
+        d: ev.data,
+      })),
+    };
+    window.localStorage.setItem(LOG_SYNC_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota / private mode failures
+  }
+}
+
+function initLogSyncStore() {
+  if (logSyncStore.initialized) return;
+  logSyncStore.initialized = true;
+  if (typeof window === "undefined") return;
+
+  try {
+    const rawJson = window.localStorage.getItem(LOG_SYNC_STORAGE_KEY);
+    if (!rawJson) return;
+    const saved = JSON.parse(rawJson);
+    if (Number.isFinite(saved?.historicalCursor)) {
+      logSyncStore.historicalCursor = Math.max(
+        CONTRACT_START_BLOCK - 1,
+        Number(saved.historicalCursor)
+      );
+    }
+    if (Number.isFinite(saved?.tailHead)) {
+      logSyncStore.tailHead = Number(saved.tailHead);
+    }
+    if (Array.isArray(saved?.logs)) {
+      mergeRawLogs(saved.logs);
+    }
+    if (logSyncStore.tailHead > CONTRACT_START_BLOCK) {
+      const totalSpan = Math.max(1, logSyncStore.tailHead - CONTRACT_START_BLOCK + 1);
+      const scannedSpan = Math.max(
+        0,
+        logSyncStore.historicalCursor - CONTRACT_START_BLOCK + 1
+      );
+      logSyncStore.syncProgress = Math.min(
+        100,
+        Math.round((scannedSpan / totalSpan) * 100)
+      );
+    }
+  } catch {
+    // Ignore corrupt localStorage entries
+  }
+}
+
+function isRetryableRpcError(err) {
+  const msg = String(
+    err?.shortMessage || err?.message || err?.info?.error?.message || ""
+  ).toLowerCase();
+  const code = err?.code ?? err?.info?.error?.code;
+  return (
+    code === -32029 ||
+    code === 429 ||
+    msg.includes("-32029") ||
+    msg.includes("429") ||
+    msg.includes("too many requests") ||
+    msg.includes("rate limit") ||
+    msg.includes("timeout") ||
+    msg.includes("network") ||
+    msg.includes("failed to fetch")
+  );
+}
+
+function isRangeLimitError(err) {
+  const msg = String(
+    err?.shortMessage || err?.message || err?.info?.error?.message || ""
+  ).toLowerCase();
+  const code = err?.code ?? err?.info?.error?.code;
+  return (
+    code === -32602 ||
+    msg.includes("range") ||
+    msg.includes("exceeded") ||
+    msg.includes("too large") ||
+    msg.includes("block")
+  );
+}
+
+async function fetchArchiveLogsWithRetry(
+  archiveProvider,
+  address,
   fromBlock,
   toBlock,
-  chunkSize = 49999
+  attempt = 1
 ) {
-  const firstBlock = Math.max(0, fromBlock);
-  const lastBlock = Math.max(0, toBlock);
-  if (lastBlock < firstBlock) return [];
-
-  const ranges = [];
-  for (let start = firstBlock; start <= lastBlock; start += chunkSize + 1) {
-    ranges.push([start, Math.min(start + chunkSize, lastBlock)]);
+  try {
+    return await archiveProvider.getLogs({ address, fromBlock, toBlock });
+  } catch (err) {
+    if (isRangeLimitError(err) && toBlock > fromBlock) {
+      const mid = fromBlock + Math.floor((toBlock - fromBlock) / 2);
+      const left = await fetchArchiveLogsWithRetry(
+        archiveProvider,
+        address,
+        fromBlock,
+        mid,
+        1
+      );
+      await sleep(ARCHIVE_CHUNK_DELAY_MS);
+      const right = await fetchArchiveLogsWithRetry(
+        archiveProvider,
+        address,
+        mid + 1,
+        toBlock,
+        1
+      );
+      return [...left, ...right];
+    }
+    if (attempt < 4 && isRetryableRpcError(err)) {
+      await sleep(1600 * attempt);
+      return fetchArchiveLogsWithRetry(
+        archiveProvider,
+        address,
+        fromBlock,
+        toBlock,
+        attempt + 1
+      );
+    }
+    throw err;
   }
+}
 
-  const allEvents = [];
-  const concurrency = 6;
-  for (let index = 0; index < ranges.length; index += concurrency) {
-    const batch = await Promise.all(
-      ranges
-        .slice(index, index + concurrency)
-        .map(([start, end]) => queryFilterRange(contract, filter, start, end)),
+async function runArchiveSync(archiveEnd) {
+  if (logSyncStore.archivePromise) return logSyncStore.archivePromise;
+
+  logSyncStore.archivePromise = (async () => {
+    const startBlock = Math.max(CONTRACT_START_BLOCK, logSyncStore.historicalCursor + 1);
+    if (archiveEnd < startBlock) {
+      logSyncStore.historicalCursor = Math.max(
+        logSyncStore.historicalCursor,
+        logSyncStore.tailHead
+      );
+      logSyncStore.syncProgress = 100;
+      logSyncStore.isSyncingHistory = false;
+      persistLogSyncStore();
+      notifyLogSyncListeners();
+      return;
+    }
+
+    const archiveProvider = getArchiveProvider();
+    const contractAddr = CONTRACT_ADDRESSES.stakingContract;
+    const totalToScan = Math.max(1, archiveEnd - CONTRACT_START_BLOCK + 1);
+
+    logSyncStore.isSyncingHistory = true;
+    logSyncStore.progressRevision += 1;
+    notifyLogSyncListeners();
+
+    let cursor = startBlock;
+    let chunksSincePersist = 0;
+    let hadFailure = false;
+
+    try {
+      while (cursor <= archiveEnd) {
+        const chunkEnd = Math.min(cursor + ARCHIVE_CHUNK_SPAN, archiveEnd);
+        let chunkLogs = [];
+        try {
+          chunkLogs = await fetchArchiveLogsWithRetry(
+            archiveProvider,
+            contractAddr,
+            cursor,
+            chunkEnd
+          );
+        } catch (err) {
+          console.warn(
+            `Archive log sync paused at [${cursor}-${chunkEnd}]:`,
+            err?.shortMessage || err?.message || err
+          );
+          hadFailure = true;
+          break;
+        }
+
+        const added = mergeRawLogs(chunkLogs);
+        logSyncStore.historicalCursor = chunkEnd;
+        const scanned = Math.max(0, chunkEnd - CONTRACT_START_BLOCK + 1);
+        logSyncStore.syncProgress = Math.min(
+          99,
+          Math.max(1, Math.round((scanned / totalToScan) * 100))
+        );
+        chunksSincePersist += 1;
+
+        if (added > 0) {
+          logSyncStore.dataRevision += 1;
+          logSyncStore.progressRevision += 1;
+          persistLogSyncStore();
+          chunksSincePersist = 0;
+          notifyLogSyncListeners();
+        } else if (chunksSincePersist >= 4) {
+          logSyncStore.progressRevision += 1;
+          persistLogSyncStore();
+          chunksSincePersist = 0;
+          notifyLogSyncListeners();
+        }
+
+        cursor = chunkEnd + 1;
+        if (cursor <= archiveEnd) {
+          await sleep(ARCHIVE_CHUNK_DELAY_MS);
+        }
+      }
+
+      if (!hadFailure && logSyncStore.historicalCursor >= archiveEnd) {
+        logSyncStore.historicalCursor = Math.max(
+          logSyncStore.historicalCursor,
+          logSyncStore.tailHead
+        );
+        logSyncStore.syncProgress = 100;
+      }
+      persistLogSyncStore();
+    } finally {
+      logSyncStore.isSyncingHistory = false;
+      logSyncStore.progressRevision += 1;
+      notifyLogSyncListeners();
+      logSyncStore.archivePromise = null;
+    }
+  })();
+
+  return logSyncStore.archivePromise;
+}
+
+export async function syncStakingContractLogs({ forceRecent = false } = {}) {
+  initLogSyncStore();
+
+  const shouldRunTail =
+    forceRecent ||
+    !logSyncStore.hasCompletedInitialTail ||
+    Date.now() - logSyncStore.lastTailSyncAt > 8000;
+
+  if (!shouldRunTail && !logSyncStore.tailPromise) {
+    const tailStart = Math.max(
+      CONTRACT_START_BLOCK,
+      logSyncStore.tailHead - TAIL_BLOCK_SPAN
     );
-    allEvents.push(...batch.flat());
+    if (
+      !logSyncStore.archivePromise &&
+      logSyncStore.tailHead > 0 &&
+      logSyncStore.historicalCursor < tailStart - 1
+    ) {
+      void runArchiveSync(tailStart - 1);
+    }
+    return logSyncStore.parsedEvents;
   }
 
-  return allEvents;
+  if (logSyncStore.tailPromise && !forceRecent) {
+    await logSyncStore.tailPromise;
+    return logSyncStore.parsedEvents;
+  }
+
+  const runTail = async () => {
+    const provider = getReadOnlyProvider();
+    try {
+      const headBlock = await provider.getBlockNumber();
+      const tailFrom = Math.max(CONTRACT_START_BLOCK, headBlock - TAIL_BLOCK_SPAN);
+      const tailLogs = await provider.getLogs({
+        address: CONTRACT_ADDRESSES.stakingContract,
+        fromBlock: tailFrom,
+        toBlock: headBlock,
+      });
+
+      const added = mergeRawLogs(tailLogs);
+      const wasInitial = !logSyncStore.hasCompletedInitialTail;
+      logSyncStore.tailHead = headBlock;
+      logSyncStore.lastTailSyncAt = Date.now();
+      logSyncStore.hasCompletedInitialTail = true;
+
+      if (tailFrom <= CONTRACT_START_BLOCK) {
+        logSyncStore.historicalCursor = Math.max(
+          logSyncStore.historicalCursor,
+          headBlock
+        );
+        logSyncStore.syncProgress = 100;
+      } else if (logSyncStore.historicalCursor >= tailFrom - 1) {
+        logSyncStore.historicalCursor = Math.max(
+          logSyncStore.historicalCursor,
+          headBlock
+        );
+        logSyncStore.syncProgress = 100;
+      }
+
+      if (added > 0 || wasInitial || forceRecent) {
+        if (added > 0 || forceRecent) {
+          logSyncStore.dataRevision += 1;
+        }
+        persistLogSyncStore();
+        notifyLogSyncListeners();
+      }
+
+      if (logSyncStore.historicalCursor < tailFrom - 1) {
+        void runArchiveSync(tailFrom - 1);
+      }
+    } catch (err) {
+      console.warn("Tail log sync failed, falling back to archive scan:", err);
+      logSyncStore.hasCompletedInitialTail = true;
+      // Attempt archive scan up to latest known or archive head
+      try {
+        const archiveProvider = getArchiveProvider();
+        const archiveHead = await archiveProvider.getBlockNumber();
+        logSyncStore.tailHead = archiveHead;
+        if (logSyncStore.historicalCursor < archiveHead) {
+          void runArchiveSync(archiveHead);
+        }
+      } catch (archiveErr) {
+        console.warn("Archive provider blockNumber failed:", archiveErr);
+      }
+    } finally {
+      if (logSyncStore.tailPromise === tailExecution) {
+        logSyncStore.tailPromise = null;
+      }
+    }
+  };
+
+  const tailExecution = runTail();
+  logSyncStore.tailPromise = tailExecution;
+  await tailExecution;
+  return logSyncStore.parsedEvents;
+}
+
+export function useContractLogSyncStatus() {
+  initLogSyncStore();
+  const [status, setStatus] = useState(() => ({
+    dataRevision: logSyncStore.dataRevision,
+    progressRevision: logSyncStore.progressRevision,
+    isSyncingHistory: logSyncStore.isSyncingHistory,
+    syncProgress: logSyncStore.syncProgress,
+  }));
+
+  useEffect(() => {
+    const listener = (next) => {
+      setStatus(next);
+    };
+    logSyncStore.listeners.add(listener);
+    return () => {
+      logSyncStore.listeners.delete(listener);
+    };
+  }, []);
+
+  return status;
+}
+
+function matchesTopicFilter(rawTopics, topicFilter) {
+  if (!topicFilter || topicFilter.length === 0) return true;
+  for (let i = 0; i < topicFilter.length; i += 1) {
+    const expected = topicFilter[i];
+    if (expected == null) continue;
+    const actual = rawTopics?.[i]?.toLowerCase();
+    if (!actual) return false;
+    if (Array.isArray(expected)) {
+      if (!expected.some((item) => item?.toLowerCase() === actual)) return false;
+    } else if (expected.toLowerCase() !== actual) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Shared synced log reader replacing per-hook RPC chunk scans.
+ * Returns decoded logs from the in-memory + localStorage hybrid sync store.
+ */
+async function fetchLogsInChunks(_contract, filter, fromBlock = 0, toBlock = Number.MAX_SAFE_INTEGER) {
+  const events = await syncStakingContractLogs();
+  const topicFilter =
+    filter && typeof filter.getTopicFilter === "function"
+      ? await filter.getTopicFilter()
+      : null;
+
+  return events.filter(
+    (ev) =>
+      ev.blockNumber >= fromBlock &&
+      ev.blockNumber <= toBlock &&
+      matchesTopicFilter(ev.topics, topicFilter)
+  );
 }
 
 async function populateBlockTimestamps(provider, events) {
@@ -275,6 +724,7 @@ function formatEventDate(timestamp, blockNumber) {
 export function useUserStakes(address) {
   const [stakes, setStakes] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { dataRevision } = useContractLogSyncStatus();
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
@@ -295,17 +745,11 @@ export function useUserStakes(address) {
         provider
       );
 
-      // Query block number safely
-      const currentBlock = await provider.getBlockNumber().catch(() => 0);
-      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
-      const toBlock = currentBlock > 0 ? currentBlock : fromBlock + 50000;
-
-      // 1. Fetch on-chain Staked events to match tx hashes and for fallback
+      // 1. Fetch on-chain Staked events from shared hybrid log store
       const stakedEvents = await fetchLogsInChunks(
         staking,
         staking.filters.Staked(normalizedAddr),
-        fromBlock,
-        toBlock
+        CONTRACT_START_BLOCK
       ).catch(() => []);
 
       const txMap = new Map();
@@ -425,7 +869,7 @@ export function useUserStakes(address) {
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
+  }, [normalizedAddr, dataRevision]);
 
   useEffect(() => {
     fetchStakes();
@@ -667,6 +1111,7 @@ export function useRegisterWallet() {
         setStep("confirming");
 
         await tx.wait(1);
+        void syncStakingContractLogs({ forceRecent: true });
 
         // Save local state for instant responsiveness
         localStorage.setItem(
@@ -785,6 +1230,7 @@ export function useStakeTokens() {
         setStep("confirming");
 
         await stakeTx.wait(1);
+        void syncStakingContractLogs({ forceRecent: true });
 
         setStep("success");
         return { success: true, hash: stakeTx.hash };
@@ -835,6 +1281,7 @@ export function useClaimStakeROI() {
 
         const tx = await staking.claimROI(BigInt(stakeIndex));
         await tx.wait(1);
+        void syncStakingContractLogs({ forceRecent: true });
 
         setIsPending(false);
         return { success: true, hash: tx.hash };
@@ -922,6 +1369,7 @@ export function useWithdrawHanaTokens() {
 
         const tx = await staking.withdrawTokens(amountWei);
         await tx.wait(1);
+        void syncStakingContractLogs({ forceRecent: true });
         return { success: true, hash: tx.hash };
       } catch (err) {
         console.error("HANA withdrawal error:", err);
@@ -948,11 +1396,13 @@ export function useWithdrawHanaTokens() {
 export function useStakingHistory(address) {
   const [stakingHistory, setStakingHistory] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { dataRevision, isSyncingHistory, syncProgress } =
+    useContractLogSyncStatus();
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
 
-  const fetchHistory = useCallback(async () => {
+  const fetchHistory = useCallback(async (forceRefresh = false) => {
     if (!normalizedAddr) {
       setStakingHistory([]);
       setIsLoading(false);
@@ -961,6 +1411,9 @@ export function useStakingHistory(address) {
 
     setIsLoading(true);
     try {
+      if (forceRefresh) {
+        await syncStakingContractLogs({ forceRecent: true });
+      }
       const provider = getReadOnlyProvider();
       const staking = new Contract(
         CONTRACT_ADDRESSES.stakingContract,
@@ -968,15 +1421,11 @@ export function useStakingHistory(address) {
         provider
       );
 
-      const currentBlock = await provider.getBlockNumber();
-      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
-
       const filter = staking.filters.Staked(normalizedAddr);
       const events = await fetchLogsInChunks(
         staking,
         filter,
-        fromBlock,
-        currentBlock
+        CONTRACT_START_BLOCK
       );
 
       // Fetch block timestamps in parallel (cached)
@@ -1041,13 +1490,19 @@ export function useStakingHistory(address) {
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
+  }, [normalizedAddr, dataRevision]);
 
   useEffect(() => {
-    fetchHistory();
+    fetchHistory(false);
   }, [fetchHistory]);
 
-  return { stakingHistory, isLoading, refetch: fetchHistory };
+  return {
+    stakingHistory,
+    isLoading,
+    isSyncingHistory,
+    syncProgress,
+    refetch: () => fetchHistory(true),
+  };
 }
 
 /**
@@ -1062,11 +1517,13 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
   const [totalDirectEarnedHana, setTotalDirectEarnedHana] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const { dataRevision, isSyncingHistory, syncProgress } =
+    useContractLogSyncStatus();
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
 
-  const fetchReferralData = useCallback(async () => {
+  const fetchReferralData = useCallback(async (forceRefresh = false) => {
     if (!normalizedAddr) {
       setDirectIncomeHistory([]);
       setRegisteredReferrals([]);
@@ -1080,6 +1537,9 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
     setIsLoading(true);
     setError("");
     try {
+      if (forceRefresh) {
+        await syncStakingContractLogs({ forceRecent: true });
+      }
       const provider = getReadOnlyProvider();
       const staking = new Contract(
         CONTRACT_ADDRESSES.stakingContract,
@@ -1087,57 +1547,42 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
         provider
       );
 
-      const currentBlock = await provider.getBlockNumber();
-      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
-
       // 1. Fetch IncomeAllotted where user is normalizedAddr
       const incomeFilter = staking.filters.IncomeAllotted(normalizedAddr);
       // 2. Fetch Registered where referrer is normalizedAddr
       const regFilter = staking.filters.Registered(null, normalizedAddr);
 
       const [incomeEvents, regEvents] = await Promise.all([
-        fetchLogsInChunks(staking, incomeFilter, fromBlock, currentBlock).catch(() => []),
+        fetchLogsInChunks(staking, incomeFilter, CONTRACT_START_BLOCK).catch(() => []),
         includeRegistrations
-          ? fetchLogsInChunks(staking, regFilter, fromBlock, currentBlock).catch(() => [])
+          ? fetchLogsInChunks(staking, regFilter, CONTRACT_START_BLOCK).catch(() => [])
           : Promise.resolve([]),
       ]);
 
-      // Cache block timestamps & tx senders
+      // Cache block timestamps
       const allEvents = [...incomeEvents, ...regEvents];
-      const blockNumbers = [...new Set(allEvents.map((e) => e.blockNumber))];
-      await Promise.all(
-        blockNumbers.map(async (bNum) => {
-          if (!blockCache.has(bNum)) {
-            try {
-              const b = await provider.getBlock(bNum);
-              if (b?.timestamp) {
-                blockCache.set(bNum, Number(b.timestamp));
-              }
-            } catch (err) {
-              console.warn("Could not fetch block timestamp:", err);
-            }
-          }
-        })
-      );
+      await populateBlockTimestamps(provider, allEvents);
 
-      // For direct income events, fetch the transaction sender (the staker who generated commission)
-      // Also fetch Staked events from same tx hashes to get stake amount
-      const txHashes = [...new Set(incomeEvents.map((e) => e.transactionHash))];
+      // Only query receipt/tx as fallback if synced Staked logs haven't populated txStakeCache yet
+      const directEvents = incomeEvents.filter((e) => {
+        const type = (e.args?.[3] ?? e.args?.incomeType ?? "").toString().toLowerCase();
+        return type === "direct";
+      });
+      const txHashes = [...new Set(directEvents.map((e) => e.transactionHash))];
 
-      // Fetch tx receipts to get staker address + Staked event logs (for stake amount)
       await Promise.all(
         txHashes.map(async (hash) => {
+          const hashLower = hash.toLowerCase();
+          const needStake = !txStakeCache.has(hash) && !txStakeCache.has(hashLower);
           const needSender = !txSenderCache.has(hash);
-          const needStake  = !txStakeCache.has(hash);
           if (!needSender && !needStake) return;
           try {
             const [tx, receipt] = await Promise.all([
               needSender ? provider.getTransaction(hash) : Promise.resolve(null),
-              needStake  ? provider.getTransactionReceipt(hash) : Promise.resolve(null),
+              needStake ? provider.getTransactionReceipt(hash) : Promise.resolve(null),
             ]);
             if (tx?.from) txSenderCache.set(hash, tx.from);
             if (receipt) {
-              // Parse Staked event logs from the receipt
               const stakedIface = new Interface(
                 HANA_STAKING_ABI.filter((x) => x.name === "Staked")
               );
@@ -1145,12 +1590,14 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
                 try {
                   const parsed = stakedIface.parseLog(log);
                   if (parsed?.name === "Staked") {
-                    txStakeCache.set(hash, {
-                      staker:      parsed.args[0],
-                      stakeAmount: parsed.args[2], // BigInt wei
-                      packageId:   Number(parsed.args[1]),
-                      stakeIndex:  Number(parsed.args[3]),
-                    });
+                    const info = {
+                      staker: parsed.args[0],
+                      stakeAmount: parsed.args[2],
+                      packageId: Number(parsed.args[1]),
+                      stakeIndex: Number(parsed.args[3]),
+                    };
+                    txStakeCache.set(hash, info);
+                    txStakeCache.set(hashLower, info);
                     break;
                   }
                 } catch {}
@@ -1165,12 +1612,7 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
       // Parse IncomeAllotted events
       let sumUsdt = 0;
       let sumHana = 0;
-      const parsedIncome = incomeEvents
-        .filter((e) => {
-          const type = (e.args?.[3] ?? e.args?.incomeType ?? "").toString().toLowerCase();
-          return type === "direct";
-        })
-        .map((e) => {
+      const parsedIncome = directEvents.map((e) => {
           const usdtWei = e.args?.[1] ?? e.args?.usdtValue ?? 0n;
           const hanaWei = e.args?.[2] ?? e.args?.hanaAllotted ?? 0n;
           const usdtNum = Number(formatEther(usdtWei));
@@ -1179,8 +1621,12 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
           sumHana += hanaNum;
 
           const timestamp = blockCache.get(e.blockNumber) || null;
-          const stakerAddress = txSenderCache.get(e.transactionHash) || null;
-          const stakeInfo    = txStakeCache.get(e.transactionHash) || null;
+          const stakeInfo =
+            txStakeCache.get(e.transactionHash) ||
+            txStakeCache.get(e.transactionHash.toLowerCase()) ||
+            null;
+          const stakerAddress =
+            stakeInfo?.staker || txSenderCache.get(e.transactionHash) || null;
           const stakeAmountNum = stakeInfo ? Number(formatEther(stakeInfo.stakeAmount)) : null;
           const pkg = stakeInfo ? DEFAULT_PACKAGES.find((p) => p.id === stakeInfo.packageId) : null;
 
@@ -1203,20 +1649,14 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
             stakePackageId: stakeInfo?.packageId ?? null,
             stakePackageName: pkg?.name ?? null,
             stakeIndex: stakeInfo?.stakeIndex ?? null,
+            stakeDisplayId:
+              stakeInfo?.stakeIndex !== undefined ? `#S-${stakeInfo.stakeIndex + 1}` : null,
             txHash: e.transactionHash,
             txShort: `${e.transactionHash.slice(0, 8)}...${e.transactionHash.slice(-6)}`,
             blockNumber: e.blockNumber,
             explorerUrl: getExplorerTxUrl(e.transactionHash),
             timestamp,
-            dateFormatted: timestamp
-              ? new Date(timestamp * 1000).toLocaleString("en-US", {
-                  day: "2-digit",
-                  month: "short",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : `Block #${e.blockNumber}`,
+            dateFormatted: formatEventDate(timestamp, e.blockNumber),
           };
         });
 
@@ -1241,15 +1681,7 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
           explorerUrl: getExplorerTxUrl(e.transactionHash),
           userExplorerUrl: userAddr ? getExplorerAddressUrl(userAddr) : null,
           timestamp,
-          dateFormatted: timestamp
-            ? new Date(timestamp * 1000).toLocaleString("en-US", {
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : `Block #${e.blockNumber}`,
+          dateFormatted: formatEventDate(timestamp, e.blockNumber),
         };
       });
 
@@ -1265,10 +1697,10 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
     } finally {
       setIsLoading(false);
     }
-  }, [includeRegistrations, normalizedAddr]);
+  }, [includeRegistrations, normalizedAddr, dataRevision]);
 
   useEffect(() => {
-    fetchReferralData();
+    fetchReferralData(false);
   }, [fetchReferralData]);
 
   return {
@@ -1277,8 +1709,10 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
     totalDirectEarnedUsdt,
     totalDirectEarnedHana,
     isLoading,
+    isSyncingHistory,
+    syncProgress,
     error,
-    refetch: fetchReferralData,
+    refetch: () => fetchReferralData(true),
   };
 }
 
@@ -1293,6 +1727,8 @@ export function useLevelIncomeHistory(address) {
   const [isLoading, setIsLoading] = useState(false);
   const [fromCache, setFromCache] = useState(false);
   const [error, setError] = useState("");
+  const { dataRevision, isSyncingHistory, syncProgress } =
+    useContractLogSyncStatus();
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
@@ -1310,12 +1746,12 @@ export function useLevelIncomeHistory(address) {
 
     const cacheKey = normalizedAddr.toLowerCase();
 
-    // Serve from cache instantly
-    if (!forceRefresh && levelIncomeCache.has(cacheKey)) {
-      const cached = levelIncomeCache.get(cacheKey);
-      setIncomeHistory(cached.incomeHistory);
-      setTotalUsdt(cached.totalUsdt);
-      setTotalHana(cached.totalHana);
+    // Serve from cache only if it matches the latest synced log revision
+    const cachedEntry = levelIncomeCache.get(cacheKey);
+    if (!forceRefresh && cachedEntry && cachedEntry.revision === dataRevision) {
+      setIncomeHistory(cachedEntry.incomeHistory);
+      setTotalUsdt(cachedEntry.totalUsdt);
+      setTotalHana(cachedEntry.totalHana);
       setFromCache(true);
       setIsLoading(false);
       return;
@@ -1325,20 +1761,21 @@ export function useLevelIncomeHistory(address) {
     setFromCache(false);
     setError("");
     try {
+      if (forceRefresh) {
+        await syncStakingContractLogs({ forceRecent: true });
+      }
       const provider = getReadOnlyProvider();
       const staking = new Contract(
         CONTRACT_ADDRESSES.stakingContract,
         HANA_STAKING_ABI,
         provider,
       );
-      const currentBlock = await provider.getBlockNumber();
-      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
       const levelFilter = staking.filters.LevelIncomeAllotted(null, normalizedAddr);
       const incomeFilter = staking.filters.IncomeAllotted(normalizedAddr);
 
       const [levelEvents, incomeEvents] = await Promise.all([
-        fetchLogsInChunks(staking, levelFilter, fromBlock, currentBlock),
-        fetchLogsInChunks(staking, incomeFilter, fromBlock, currentBlock),
+        fetchLogsInChunks(staking, levelFilter, CONTRACT_START_BLOCK),
+        fetchLogsInChunks(staking, incomeFilter, CONTRACT_START_BLOCK),
       ]);
 
       const levelTxSet = new Set(levelEvents.map((e) => e.transactionHash));
@@ -1361,22 +1798,38 @@ export function useLevelIncomeHistory(address) {
         const usdtNumber = Number(formatEther(usdtWei));
         const hanaNumber = Number(formatEther(hanaWei));
         const timestamp = blockCache.get(event.blockNumber) || null;
+        const roiInfo =
+          txRoiClaimCache.get(event.transactionHash) ||
+          txRoiClaimCache.get(event.transactionHash.toLowerCase()) ||
+          null;
+        const resolvedFrom = fromAddress || roiInfo?.claimer || null;
+        const roiUsdtNumber = roiInfo ? Number(formatEther(roiInfo.usdtValue || 0n)) : null;
+        const roiHanaNumber = roiInfo ? Number(formatEther(roiInfo.hanaAllotted || 0n)) : null;
+
         sumUsdt += usdtNumber;
         sumHana += hanaNumber;
 
         return {
-          fromAddress,
-          fromShort: fromAddress
-            ? `${fromAddress.slice(0, 6)}...${fromAddress.slice(-4)}`
+          fromAddress: resolvedFrom,
+          fromShort: resolvedFrom
+            ? `${resolvedFrom.slice(0, 6)}...${resolvedFrom.slice(-4)}`
             : "Network member",
-          fromExplorerUrl: fromAddress
-            ? getExplorerAddressUrl(fromAddress)
+          fromExplorerUrl: resolvedFrom
+            ? getExplorerAddressUrl(resolvedFrom)
             : null,
           level,
           usdtNumber,
           hanaNumber,
           usdtFormatted: usdtNumber.toFixed(2),
           hanaFormatted: hanaNumber.toFixed(2),
+          // Enriched ROIClaimed details from the same claimROI transaction
+          stakeIndex: roiInfo?.stakeIndex ?? null,
+          stakeDisplayId:
+            roiInfo?.stakeIndex !== undefined ? `#S-${roiInfo.stakeIndex + 1}` : null,
+          roiUsdtNumber,
+          roiUsdtFormatted: roiUsdtNumber !== null ? roiUsdtNumber.toFixed(2) : null,
+          roiHanaNumber,
+          roiHanaFormatted: roiHanaNumber !== null ? roiHanaNumber.toFixed(2) : null,
           txHash: event.transactionHash,
           txShort: `${event.transactionHash.slice(0, 8)}...${event.transactionHash.slice(-6)}`,
           blockNumber: event.blockNumber,
@@ -1411,8 +1864,9 @@ export function useLevelIncomeHistory(address) {
       const parsedIncome = [...parsedPrimary, ...parsedFallback];
       parsedIncome.sort((a, b) => b.blockNumber - a.blockNumber);
 
-      // Store in cache
+      // Store in cache keyed to current log revision
       levelIncomeCache.set(cacheKey, {
+        revision: dataRevision,
         incomeHistory: parsedIncome,
         totalUsdt: sumUsdt,
         totalHana: sumHana,
@@ -1432,7 +1886,7 @@ export function useLevelIncomeHistory(address) {
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
+  }, [normalizedAddr, dataRevision]);
 
   useEffect(() => {
     fetchLevelIncomeHistory();
@@ -1449,6 +1903,8 @@ export function useLevelIncomeHistory(address) {
     totalHana,
     fromCache,
     isLoading,
+    isSyncingHistory,
+    syncProgress,
     error,
     refetch: hardRefetch,
   };
@@ -1464,11 +1920,12 @@ export function useROIHistory(address) {
   const [totalHana, setTotalHana] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const { dataRevision } = useContractLogSyncStatus();
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
 
-  const fetchRoiHistory = useCallback(async () => {
+  const fetchRoiHistory = useCallback(async (forceRefresh = false) => {
     if (!normalizedAddr) {
       setRoiHistory([]);
       setTotalUsdt(0);
@@ -1481,6 +1938,9 @@ export function useROIHistory(address) {
     setIsLoading(true);
     setError("");
     try {
+      if (forceRefresh) {
+        await syncStakingContractLogs({ forceRecent: true });
+      }
       const provider = getReadOnlyProvider();
       const staking = new Contract(
         CONTRACT_ADDRESSES.stakingContract,
@@ -1488,11 +1948,8 @@ export function useROIHistory(address) {
         provider
       );
 
-      const currentBlock = await provider.getBlockNumber();
-      const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
-
       const filter = staking.filters.ROIClaimed(normalizedAddr);
-      const events = await fetchLogsInChunks(staking, filter, fromBlock, currentBlock).catch(() => []);
+      const events = await fetchLogsInChunks(staking, filter, CONTRACT_START_BLOCK).catch(() => []);
 
       // Cache block timestamps
       const blockNumbers = [...new Set(events.map((e) => e.blockNumber))];
@@ -1559,13 +2016,20 @@ export function useROIHistory(address) {
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
+  }, [normalizedAddr, dataRevision]);
 
   useEffect(() => {
-    fetchRoiHistory();
+    fetchRoiHistory(false);
   }, [fetchRoiHistory]);
 
-  return { roiHistory, totalUsdt, totalHana, isLoading, error, refetch: fetchRoiHistory };
+  return {
+    roiHistory,
+    totalUsdt,
+    totalHana,
+    isLoading,
+    error,
+    refetch: () => fetchRoiHistory(true),
+  };
 }
 
 /**
@@ -1593,6 +2057,7 @@ export function useIncomeHistory(address) {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const { dataRevision } = useContractLogSyncStatus();
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
@@ -1613,10 +2078,10 @@ export function useIncomeHistory(address) {
       const provider = getReadOnlyProvider();
       const staking = new Contract(CONTRACT_ADDRESSES.stakingContract, HANA_STAKING_ABI, provider);
 
-      const currentBlock = await provider.getBlockNumber();
       const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
+      const currentBlock = Number.MAX_SAFE_INTEGER;
 
-      // Fire all 4 event queries in parallel
+      // Fire all 4 event queries from shared hybrid sync store
       const [roiEvts, incomeEvts, levelEvts, stakedEvts] = await Promise.all([
         fetchLogsInChunks(staking, staking.filters.ROIClaimed(normalizedAddr), fromBlock, currentBlock).catch(() => []),
         fetchLogsInChunks(staking, staking.filters.IncomeAllotted(normalizedAddr), fromBlock, currentBlock).catch(() => []),
@@ -1851,11 +2316,7 @@ export function useIncomeHistory(address) {
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
-
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+  }, [normalizedAddr, dataRevision]);
 
   return {
     allEvents,
@@ -1882,6 +2343,7 @@ export function useMyTeam(address) {
   const [totalTeamBusiness, setTotalTeamBusiness] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const { dataRevision } = useContractLogSyncStatus();
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
@@ -1902,8 +2364,8 @@ export function useMyTeam(address) {
       const provider = getReadOnlyProvider();
       const staking = new Contract(CONTRACT_ADDRESSES.stakingContract, HANA_STAKING_ABI, provider);
 
-      const currentBlock = await provider.getBlockNumber();
       const fromBlock = Math.max(0, CONTRACT_START_BLOCK);
+      const currentBlock = Number.MAX_SAFE_INTEGER;
 
       // 1. Fetch all Registered events where referrer == my address
       const regFilter = staking.filters.Registered(null, normalizedAddr);
@@ -2062,7 +2524,7 @@ export function useMyTeam(address) {
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
+  }, [normalizedAddr, dataRevision]);
 
   useEffect(() => {
     fetchTeam();
@@ -2107,6 +2569,7 @@ export function useTeamByLevel(address) {
 
   // Track if we imported from cache so UI shows instantly
   const [fromCache, setFromCache]   = useState(false);
+  const { dataRevision }            = useContractLogSyncStatus();
 
   const isAddrValid    = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
@@ -2124,16 +2587,17 @@ export function useTeamByLevel(address) {
 
     const cacheKey = normalizedAddr.toLowerCase();
 
-    // ── Serve from result cache immediately (unless force refresh) ──
-    if (!forceRefresh && teamResultCache.has(cacheKey)) {
-      const cached = teamResultCache.get(cacheKey);
-      setLevelMap(cached.levelMap);
-      setAllMembers(cached.allMembers);
-      setLevelStats(cached.levelStats);
+    // ── Serve from result cache immediately only if same log sync revision ──
+    const cachedTree = teamResultCache.get(cacheKey);
+    if (!forceRefresh && cachedTree && cachedTree.revision === dataRevision) {
+      setLevelMap(cachedTree.levelMap);
+      setAllMembers(cachedTree.allMembers);
+      setLevelStats(cachedTree.levelStats);
       setFromCache(true);
       setIsLoading(false);
       return;
     }
+    teamChildrenCache.clear();
 
     setIsLoading(true);
     setFromCache(false);
@@ -2143,8 +2607,8 @@ export function useTeamByLevel(address) {
       const provider   = getReadOnlyProvider();
       const staking    = new Contract(CONTRACT_ADDRESSES.stakingContract, HANA_STAKING_ABI, provider);
 
-      const currentBlock = await provider.getBlockNumber();
       const fromBlock    = Math.max(0, CONTRACT_START_BLOCK);
+      const currentBlock = Number.MAX_SAFE_INTEGER;
 
       // ── Helper 1: get direct children of a set of parents ──────────────────
       // Uses teamChildrenCache to avoid re-querying same parent address
@@ -2355,7 +2819,12 @@ export function useTeamByLevel(address) {
       });
 
       // ── Store full result in result cache ────────────────────────────────────
-      teamResultCache.set(cacheKey, { levelMap: newLevelMap, allMembers: flatAll, levelStats: stats });
+      teamResultCache.set(cacheKey, {
+        revision: dataRevision,
+        levelMap: newLevelMap,
+        allMembers: flatAll,
+        levelStats: stats,
+      });
 
       setLevelMap(newLevelMap);
       setAllMembers(flatAll);
@@ -2367,7 +2836,7 @@ export function useTeamByLevel(address) {
     } finally {
       setIsLoading(false);
     }
-  }, [normalizedAddr]);
+  }, [normalizedAddr, dataRevision]);
 
   // On mount / address change — serve cache first, then background refresh
   useEffect(() => {
@@ -2386,4 +2855,259 @@ export function useTeamByLevel(address) {
   }, [normalizedAddr, fetchTree]);
 
   return { levelMap, allMembers, levelStats, fromCache, isLoading, error, refetch: hardRefetch };
+}
+
+/**
+ * Pure helper to compute Strong Leg, Weak Legs, Matching Business, and per-leg breakdown
+ * from decoded Registered + Staked contract events.
+ */
+export function computeTeamLegBusiness(events, rootAddress, timestampLookup = null) {
+  if (!rootAddress || !isAddress(rootAddress)) {
+    return {
+      legs: [],
+      strongLeg: null,
+      weakLegs: [],
+      strongLegBusiness: 0,
+      weakLegBusiness: 0,
+      totalTeamBusiness: 0,
+      matchingBusiness: 0,
+      activeLegsCount: 0,
+      totalLegsCount: 0,
+      qualifiedTwoLegs: false,
+      strongLegRatioPct: 0,
+      weakLegRatioPct: 0,
+    };
+  }
+
+  const rootNormalized = getAddress(rootAddress);
+  const rootLower = rootNormalized.toLowerCase();
+
+  const seenChildren = new Set();
+  const childrenByReferrer = new Map();
+  const stakeStatsByUser = new Map();
+
+  for (const ev of events || []) {
+    if (ev.eventName === "Registered") {
+      const rawUser = ev.args?.[0] ?? ev.args?.user;
+      const rawReferrer = ev.args?.[1] ?? ev.args?.referrer;
+      if (!rawUser || !rawReferrer || !isAddress(rawUser) || !isAddress(rawReferrer)) {
+        continue;
+      }
+      const userAddr = getAddress(rawUser);
+      const refAddr = getAddress(rawReferrer);
+      const userLower = userAddr.toLowerCase();
+      const refLower = refAddr.toLowerCase();
+      if (userLower === refLower || seenChildren.has(userLower)) continue;
+      seenChildren.add(userLower);
+
+      if (!childrenByReferrer.has(refLower)) {
+        childrenByReferrer.set(refLower, []);
+      }
+      childrenByReferrer.get(refLower).push({
+        address: userAddr,
+        txHash: ev.transactionHash,
+        blockNumber: ev.blockNumber,
+      });
+    } else if (ev.eventName === "Staked") {
+      const rawUser = ev.args?.[0] ?? ev.args?.user;
+      if (!rawUser || !isAddress(rawUser)) continue;
+      const userLower = getAddress(rawUser).toLowerCase();
+      const amountWei = ev.args?.[2] ?? ev.args?.amount ?? 0n;
+      const prev = stakeStatsByUser.get(userLower) || {
+        totalStakedWei: 0n,
+        stakeCount: 0,
+      };
+      stakeStatsByUser.set(userLower, {
+        totalStakedWei: prev.totalStakedWei + amountWei,
+        stakeCount: prev.stakeCount + 1,
+      });
+    }
+  }
+
+  const directChildren = childrenByReferrer.get(rootLower) || [];
+
+  const rawLegs = directChildren.map((child) => {
+    const childLower = child.address.toLowerCase();
+    const directStats = stakeStatsByUser.get(childLower) || {
+      totalStakedWei: 0n,
+      stakeCount: 0,
+    };
+
+    const visited = new Set([rootLower, childLower]);
+    const queue = [...(childrenByReferrer.get(childLower) || [])];
+    let downlineWei = 0n;
+    let downlineMembers = 0;
+    let activeDownlineMembers = 0;
+
+    while (queue.length > 0) {
+      const member = queue.shift();
+      const memberLower = member.address.toLowerCase();
+      if (visited.has(memberLower)) continue;
+      visited.add(memberLower);
+
+      downlineMembers += 1;
+      const memberStats = stakeStatsByUser.get(memberLower);
+      if (memberStats && memberStats.totalStakedWei > 0n) {
+        downlineWei += memberStats.totalStakedWei;
+        activeDownlineMembers += 1;
+      }
+
+      const subChildren = childrenByReferrer.get(memberLower) || [];
+      for (const sub of subChildren) {
+        if (!visited.has(sub.address.toLowerCase())) {
+          queue.push(sub);
+        }
+      }
+    }
+
+    const directStaked = Number(formatEther(directStats.totalStakedWei));
+    const teamStaked = Number(formatEther(downlineWei));
+    const totalLegBusiness = directStaked + teamStaked;
+    const directIsActive = directStats.totalStakedWei > 0n ? 1 : 0;
+    const memberCount = 1 + downlineMembers;
+    const activeMemberCount = directIsActive + activeDownlineMembers;
+    const timestamp = timestampLookup ? timestampLookup.get(child.blockNumber) || null : null;
+
+    return {
+      address: child.address,
+      addressShort: `${child.address.slice(0, 6)}...${child.address.slice(-4)}`,
+      explorerUrl: getExplorerAddressUrl(child.address),
+      regTxHash: child.txHash,
+      regTxShort: child.txHash
+        ? `${child.txHash.slice(0, 8)}...${child.txHash.slice(-6)}`
+        : null,
+      regExplorerUrl: child.txHash ? getExplorerTxUrl(child.txHash) : null,
+      blockNumber: child.blockNumber,
+      timestamp,
+      joinedFormatted: formatEventDate(timestamp, child.blockNumber),
+      directStaked,
+      directStakedFormatted: directStaked.toFixed(2),
+      teamStaked,
+      teamStakedFormatted: teamStaked.toFixed(2),
+      totalLegBusiness,
+      totalLegBusinessFormatted: totalLegBusiness.toFixed(2),
+      stakeCount: directStats.stakeCount,
+      memberCount,
+      downlineMembers,
+      activeMemberCount,
+      isActiveLeg: totalLegBusiness > 0,
+    };
+  });
+
+  rawLegs.sort((a, b) => {
+    if (b.totalLegBusiness !== a.totalLegBusiness) {
+      return b.totalLegBusiness - a.totalLegBusiness;
+    }
+    if (b.activeMemberCount !== a.activeMemberCount) {
+      return b.activeMemberCount - a.activeMemberCount;
+    }
+    return b.memberCount - a.memberCount;
+  });
+
+  const totalTeamBusiness = rawLegs.reduce((sum, l) => sum + l.totalLegBusiness, 0);
+  const legs = rawLegs.map((leg, index) => ({
+    ...leg,
+    rankOrder: index + 1,
+    legRole: index === 0 ? "Strong Leg" : "Weak Leg",
+    sharePct:
+      totalTeamBusiness > 0 ? (leg.totalLegBusiness / totalTeamBusiness) * 100 : 0,
+  }));
+
+  const strongLeg = legs[0] || null;
+  const weakLegs = legs.slice(1);
+  const strongLegBusiness = strongLeg ? strongLeg.totalLegBusiness : 0;
+  const weakLegBusiness = weakLegs.reduce((sum, l) => sum + l.totalLegBusiness, 0);
+  const matchingBusiness = Math.min(strongLegBusiness, weakLegBusiness);
+  const activeLegsCount = legs.filter((l) => l.isActiveLeg).length;
+
+  return {
+    legs,
+    strongLeg,
+    weakLegs,
+    strongLegBusiness,
+    weakLegBusiness,
+    totalTeamBusiness,
+    matchingBusiness,
+    activeLegsCount,
+    totalLegsCount: legs.length,
+    qualifiedTwoLegs: activeLegsCount >= 2,
+    strongLegRatioPct:
+      totalTeamBusiness > 0 ? (strongLegBusiness / totalTeamBusiness) * 100 : 0,
+    weakLegRatioPct:
+      totalTeamBusiness > 0 ? (weakLegBusiness / totalTeamBusiness) * 100 : 0,
+  };
+}
+
+/**
+ * Compute Strong Leg vs Weak Leg business breakdown for Rank Incentives from event logs
+ */
+export function useTeamLegBusiness(address) {
+  const [data, setData] = useState(() => computeTeamLegBusiness([], null));
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { dataRevision, isSyncingHistory, syncProgress } =
+    useContractLogSyncStatus();
+
+  const isAddrValid = Boolean(address && isAddress(address));
+  const normalizedAddr = isAddrValid ? getAddress(address) : null;
+
+  const fetchLegBusiness = useCallback(
+    async (forceRefresh = false) => {
+      if (!normalizedAddr) {
+        setData(computeTeamLegBusiness([], null));
+        setError("");
+        setIsLoading(false);
+        return;
+      }
+
+      setIsLoading(true);
+      setError("");
+      try {
+        const events = await syncStakingContractLogs({
+          forceRecent: forceRefresh,
+        });
+
+        const directRegEvents = events.filter(
+          (ev) =>
+            ev.eventName === "Registered" &&
+            ev.args?.[1] &&
+            isAddress(ev.args[1]) &&
+            getAddress(ev.args[1]).toLowerCase() === normalizedAddr.toLowerCase()
+        );
+        if (directRegEvents.length > 0) {
+          await populateBlockTimestamps(getReadOnlyProvider(), directRegEvents);
+        }
+
+        const computed = computeTeamLegBusiness(
+          events,
+          normalizedAddr,
+          blockCache
+        );
+        setData(computed);
+      } catch (err) {
+        console.warn("Could not compute team leg business:", err);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not calculate strong leg & weak leg business."
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [normalizedAddr, dataRevision]
+  );
+
+  useEffect(() => {
+    fetchLegBusiness(false);
+  }, [fetchLegBusiness]);
+
+  return {
+    ...data,
+    isLoading,
+    isSyncingHistory,
+    syncProgress,
+    error,
+    refetch: () => fetchLegBusiness(true),
+  };
 }
