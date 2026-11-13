@@ -2041,6 +2041,8 @@ export function useROIHistory(address) {
  *
  * Returns a unified sorted log and per-category summaries.
  */
+const incomeHistoryCache = new Map();
+
 export function useIncomeHistory(address) {
   const [allEvents, setAllEvents] = useState([]);
   const [roiEvents, setRoiEvents] = useState([]);
@@ -2062,7 +2064,7 @@ export function useIncomeHistory(address) {
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (forceRefresh = false) => {
     if (!normalizedAddr) {
       setAllEvents([]); setRoiEvents([]); setDirectEvents([]);
       setLevelEvents([]); setStakingEvents([]);
@@ -2071,10 +2073,32 @@ export function useIncomeHistory(address) {
       return;
     }
 
+    const cacheKey = normalizedAddr.toLowerCase();
+    const cachedEntry = incomeHistoryCache.get(cacheKey);
+    if (
+      !forceRefresh &&
+      cachedEntry &&
+      cachedEntry.revision === dataRevision
+    ) {
+      setAllEvents(cachedEntry.allEvents);
+      setRoiEvents(cachedEntry.roiEvents);
+      setDirectEvents(cachedEntry.directEvents);
+      setLevelEvents(cachedEntry.levelEvents);
+      setStakingEvents(cachedEntry.stakingEvents);
+      setTotals(cachedEntry.totals);
+      setError("");
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     setError("");
 
     try {
+      if (forceRefresh) {
+        await syncStakingContractLogs({ forceRecent: true });
+      }
+
       const provider = getReadOnlyProvider();
       const staking = new Contract(CONTRACT_ADDRESSES.stakingContract, HANA_STAKING_ABI, provider);
 
@@ -2083,10 +2107,10 @@ export function useIncomeHistory(address) {
 
       // Fire all 4 event queries from shared hybrid sync store
       const [roiEvts, incomeEvts, levelEvts, stakedEvts] = await Promise.all([
-        fetchLogsInChunks(staking, staking.filters.ROIClaimed(normalizedAddr), fromBlock, currentBlock).catch(() => []),
-        fetchLogsInChunks(staking, staking.filters.IncomeAllotted(normalizedAddr), fromBlock, currentBlock).catch(() => []),
-        fetchLogsInChunks(staking, staking.filters.LevelIncomeAllotted(null, normalizedAddr), fromBlock, currentBlock).catch(() => []),
-        fetchLogsInChunks(staking, staking.filters.Staked(normalizedAddr), fromBlock, currentBlock).catch(() => []),
+        fetchLogsInChunks(staking, staking.filters.ROIClaimed(normalizedAddr), fromBlock, currentBlock),
+        fetchLogsInChunks(staking, staking.filters.IncomeAllotted(normalizedAddr), fromBlock, currentBlock),
+        fetchLogsInChunks(staking, staking.filters.LevelIncomeAllotted(null, normalizedAddr), fromBlock, currentBlock),
+        fetchLogsInChunks(staking, staking.filters.Staked(normalizedAddr), fromBlock, currentBlock),
       ]);
 
       // Cache block timestamps for all events at once
@@ -2296,12 +2320,7 @@ export function useIncomeHistory(address) {
       const unified = [...parsedRoi, ...parsedDirect, ...parsedLevel, ...parsedStaked];
       unified.sort(sortByBlock);
 
-      setRoiEvents(parsedRoi);
-      setDirectEvents(parsedDirect);
-      setLevelEvents(parsedLevel);
-      setStakingEvents(parsedStaked);
-      setAllEvents(unified);
-      setTotals({
+      const nextTotals = {
         roiUsdt: roiUsdtSum,
         roiHana: roiHanaSum,
         directUsdt: directUsdtSum,
@@ -2309,7 +2328,22 @@ export function useIncomeHistory(address) {
         levelUsdt: levelUsdtSum,
         levelHana: levelHanaSum,
         stakedUsdt: stakedUsdtSum,
+      };
+      incomeHistoryCache.set(cacheKey, {
+        revision: logSyncStore.dataRevision,
+        allEvents: unified,
+        roiEvents: parsedRoi,
+        directEvents: parsedDirect,
+        levelEvents: parsedLevel,
+        stakingEvents: parsedStaked,
+        totals: nextTotals,
       });
+      setRoiEvents(parsedRoi);
+      setDirectEvents(parsedDirect);
+      setLevelEvents(parsedLevel);
+      setStakingEvents(parsedStaked);
+      setAllEvents(unified);
+      setTotals(nextTotals);
     } catch (err) {
       console.warn("Could not fetch income history:", err);
       setError(err instanceof Error ? err.message : "Could not load income history.");
@@ -2317,6 +2351,10 @@ export function useIncomeHistory(address) {
       setIsLoading(false);
     }
   }, [normalizedAddr, dataRevision]);
+
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
 
   return {
     allEvents,
@@ -2327,7 +2365,7 @@ export function useIncomeHistory(address) {
     totals,
     isLoading,
     error,
-    refetch: fetchAll,
+    refetch: () => fetchAll(true),
   };
 }
 
