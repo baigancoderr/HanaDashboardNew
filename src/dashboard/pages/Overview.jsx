@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppKitAccount } from "@reown/appkit/react";
 import {
   Wallet,
@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Loader2,
   History,
+  RefreshCw,
 } from "lucide-react";
 import {
   AreaChart,
@@ -36,25 +37,17 @@ import {
   useUserStakes,
   useUsdtBalance,
   useHanaBalance,
+  useIncomeHistory,
 } from "../../contracts/hooks";
-import { DEFAULT_PACKAGES, getExplorerTxUrl } from "../../contracts/config";
+import { DEFAULT_PACKAGES } from "../../contracts/config";
 
-const earningsData = [
-  { day: "Day 1", roi: 5, direct: 2, level: 1 },
-  { day: "Day 3", roi: 8, direct: 5, level: 2 },
-  { day: "Day 5", roi: 12, direct: 5, level: 3 },
-  { day: "Day 7", roi: 14, direct: 10, level: 4 },
-  { day: "Day 9", roi: 16, direct: 10, level: 6 },
-  { day: "Day 11", roi: 20, direct: 15, level: 7 },
-  { day: "Day 14", roi: 24, direct: 20, level: 9 },
-];
-
-const incomeBreakdown = [
-  { name: "ROI Income", value: 45, color: "#FFB51D" },
-  { name: "Direct Income", value: 25, color: "#E5E5E5" },
-  { name: "Level Income", value: 20, color: "#a78bfa" },
-  { name: "Rank Rewards", value: 10, color: "#34d399" },
-];
+const incomeColors = {
+  roi: "#FFB51D",
+  direct: "#E5E5E5",
+  level: "#a78bfa",
+  rank: "#34d399",
+  dao: "#38bdf8",
+};
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
@@ -63,7 +56,7 @@ const CustomTooltip = ({ active, payload, label }) => {
         <p className="mb-2 text-[12px] font-medium text-[#A3A3A3]">{label}</p>
         {payload.map((entry) => (
           <p key={entry.name} className="text-[12px]" style={{ color: entry.color }}>
-            {entry.name}: <span className="font-bold">${entry.value}</span>
+            {entry.name}: <span className="font-bold">${Number(entry.value).toFixed(2)}</span>
           </p>
         ))}
       </div>
@@ -76,9 +69,50 @@ export default function Overview() {
   const [toast, setToast] = useState("");
   const { address } = useAppKitAccount({ namespace: "eip155" });
   const { user } = useUserData(address);
-  const { stakes, isLoading: stakesLoading } = useUserStakes(address);
+  const { stakes } = useUserStakes(address);
   const { balanceFormatted: usdtBalance } = useUsdtBalance(address);
   const { balanceFormatted: hanaBalance } = useHanaBalance(address);
+  const {
+    allEvents: incomeEvents,
+    totals: incomeTotals,
+    isLoading: incomeLoading,
+    error: incomeError,
+    refetch: refetchIncome,
+  } = useIncomeHistory(address);
+
+  const earningsData = useMemo(() => {
+    const dailyTotals = new Map();
+    incomeEvents.forEach((event) => {
+      if (!["roi", "direct", "level"].includes(event.category) || !event.timestamp) return;
+      const date = new Date(event.timestamp * 1000);
+      if (Number.isNaN(date.getTime())) return;
+      const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const entry = dailyTotals.get(dateKey) || {
+        day: date.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        roi: 0,
+        direct: 0,
+        level: 0,
+      };
+      entry[event.category] += event.usdtNumber || 0;
+      dailyTotals.set(dateKey, entry);
+    });
+    return [...dailyTotals.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .slice(-14)
+      .map(([, entry]) => entry);
+  }, [incomeEvents]);
+
+  const incomeBreakdown = useMemo(() => {
+    const entries = [
+      { name: "ROI Income", value: incomeTotals.roiUsdt, color: incomeColors.roi },
+      { name: "Direct Income", value: incomeTotals.directUsdt, color: incomeColors.direct },
+      { name: "Level Income", value: incomeTotals.levelUsdt, color: incomeColors.level },
+      { name: "Rank Rewards", value: Number.parseFloat(user?.totalRankFormatted || "0"), color: incomeColors.rank },
+      { name: "DAO Earnings", value: Number.parseFloat(user?.totalDAOFormatted || "0"), color: incomeColors.dao },
+    ];
+    return entries.filter((entry) => Number.isFinite(entry.value) && entry.value > 0);
+  }, [incomeTotals, user]);
+  const totalIncomeBreakdown = incomeBreakdown.reduce((sum, entry) => sum + entry.value, 0);
 
   const referralLink = address
     ? `${window.location.origin}/register?ref=${encodeURIComponent(address)}`
@@ -223,13 +257,13 @@ export default function Overview() {
           color="blue"
         />
 
-        {/* <StatCard
+        <StatCard
           icon={Users}
           label="Direct Income"
           value={`$${directIncome.toLocaleString()}`}
           sub="5% direct referral"
           color="blue"
-        /> */}
+        />
 
 
         <StatCard
@@ -413,68 +447,119 @@ export default function Overview() {
         {/* Earnings Chart */}
         <SectionCard
           title="Earnings Overview"
-          subtitle="Performance tracking"
+          subtitle="Daily on-chain earnings (USDT)"
           className="lg:col-span-2"
+          action={
+            <button
+              type="button"
+              onClick={() => refetchIncome?.()}
+              disabled={incomeLoading || !address}
+              className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-[#161616] px-3 py-2 text-xs font-medium text-neutral-300 transition hover:border-[#FFB51D]/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={incomeLoading ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          }
         >
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={earningsData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="roiGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#FFB51D" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#FFB51D" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="directGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#E5E5E5" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#E5E5E5" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="levelGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#222222" />
-              <XAxis dataKey="day" tick={{ fill: "#737373", fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "#737373", fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="roi" name="ROI" stroke="#FFB51D" strokeWidth={2} fill="url(#roiGrad)" />
-              <Area type="monotone" dataKey="direct" name="Direct" stroke="#E5E5E5" strokeWidth={2} fill="url(#directGrad)" />
-              <Area type="monotone" dataKey="level" name="Level" stroke="#a78bfa" strokeWidth={2} fill="url(#levelGrad)" />
-            </AreaChart>
-          </ResponsiveContainer>
+          {!address ? (
+            <p className="py-12 text-center text-sm text-neutral-400">Connect your wallet to view earnings.</p>
+          ) : incomeError ? (
+            <p className="py-12 text-center text-sm text-red-300" role="alert">
+              Could not load earnings: {incomeError}
+            </p>
+          ) : incomeLoading && earningsData.length === 0 ? (
+            <div className="flex h-[220px] items-center justify-center text-[#FFB51D]">
+              <Loader2 size={18} className="mr-2 animate-spin" />
+              <span className="text-xs">Loading on-chain earnings...</span>
+            </div>
+          ) : earningsData.length === 0 ? (
+            <p className="py-12 text-center text-sm text-neutral-400">No dated earnings events found yet.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={earningsData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="roiGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#FFB51D" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#FFB51D" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="directGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#E5E5E5" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#E5E5E5" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="levelGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#a78bfa" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#222222" />
+                <XAxis dataKey="day" tick={{ fill: "#737373", fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis
+                  tick={{ fill: "#737373", fontSize: 11 }}
+                  tickFormatter={(value) => `$${Number(value).toLocaleString()}`}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip content={<CustomTooltip />} />
+                <Area type="monotone" dataKey="roi" name="ROI" stroke="#FFB51D" strokeWidth={2} fill="url(#roiGrad)" />
+                <Area type="monotone" dataKey="direct" name="Direct" stroke="#E5E5E5" strokeWidth={2} fill="url(#directGrad)" />
+                <Area type="monotone" dataKey="level" name="Level" stroke="#a78bfa" strokeWidth={2} fill="url(#levelGrad)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
         </SectionCard>
 
         {/* Income Breakdown */}
-        <SectionCard title="Income Breakdown" subtitle="Distribution of earnings" className="min-w-0">
+        <SectionCard title="Income Breakdown" subtitle="Lifetime on-chain income by category" className="min-w-0">
           <div className="min-w-0">
-            <ResponsiveContainer width="100%" height={190}>
-              <PieChart>
-                <Pie
-                  data={incomeBreakdown}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius="48%"
-                  outerRadius="70%"
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  {incomeBreakdown.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
+            {!address ? (
+              <p className="py-12 text-center text-sm text-neutral-400">Connect your wallet to view income.</p>
+            ) : incomeError ? (
+              <p className="py-12 text-center text-sm text-red-300" role="alert">
+                Could not load income: {incomeError}
+              </p>
+            ) : incomeLoading && incomeBreakdown.length === 0 ? (
+              <div className="flex h-[190px] items-center justify-center text-[#FFB51D]">
+                <Loader2 size={18} className="mr-2 animate-spin" />
+                <span className="text-xs">Loading income breakdown...</span>
+              </div>
+            ) : incomeBreakdown.length === 0 ? (
+              <p className="py-12 text-center text-sm text-neutral-400">No income recorded yet.</p>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={190}>
+                  <PieChart>
+                    <Pie
+                      data={incomeBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="48%"
+                      outerRadius="70%"
+                      paddingAngle={4}
+                      dataKey="value"
+                    >
+                      {incomeBreakdown.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} strokeWidth={0} />
+                      ))}
+                    </Pie>
+                    <Tooltip content={<CustomTooltip />} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
+                  {incomeBreakdown.map((entry) => (
+                    <div key={entry.name} className="flex min-w-0 items-center gap-2">
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: entry.color }} />
+                      <span className="truncate text-[11px] text-[#A3A3A3]">{entry.name}</span>
+                      <span className="ml-auto whitespace-nowrap text-[11px] font-semibold text-white">
+                        ${entry.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <span className="ml-1 text-[#737373]">
+                          ({totalIncomeBreakdown > 0 ? ((entry.value / totalIncomeBreakdown) * 100).toFixed(1) : "0.0"}%)
+                        </span>
+                      </span>
+                    </div>
                   ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2">
-              {incomeBreakdown.map((entry) => (
-                <div key={entry.name} className="flex min-w-0 items-center gap-2">
-                  <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: entry.color }}
-                  />
-                  <span className="truncate text-[11px] text-[#A3A3A3]">{entry.name}</span>
-                  <span className="ml-auto text-[11px] font-semibold text-white">{entry.value}%</span>
                 </div>
-              ))}
-            </div>
+              </>
+            )}
           </div>
         </SectionCard>
       </div>
