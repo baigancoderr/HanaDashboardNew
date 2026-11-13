@@ -30,8 +30,9 @@ const navSections = [
       // { icon: Package, label: "Packages", path: "/dashboard/packages" },
       // { icon: TrendingUp, label: "ROI & Income", path: "/dashboard/roi" },
       { icon: Shield, label: "Staking", path: "/dashboard/staking" },
+         { icon: Network,    label: "My Team",       path: "/dashboard/my-team" },
       { icon: TrendingUp, label: "Direct Income", path: "/dashboard/direct-income" },
-      { icon: Network,    label: "My Team",       path: "/dashboard/my-team" },
+   
       { icon: Users, label: "Level Income", path: "/dashboard/levels" },
       { icon: Award, label: "Rank Incentives", path: "/dashboard/ranks" },
     ],
@@ -48,21 +49,21 @@ const navSections = [
       { icon: Settings, label: "Settings", path: "/dashboard/settings" },
     ],
   },
-  {
-    label: "HISTORY",
-    items: [
-      {
-        icon: Users,
-        label: "Referral Income History",
-        path: "/dashboard/history/referral-income",
-      },
-      {
-        icon: Layers,
-        label: "Level Income History",
-        path: "/dashboard/history/level-income",
-      },
-    ],
-  },
+  // {
+  //   label: "HISTORY",
+  //   items: [
+  //     {
+  //       icon: Users,
+  //       label: "Referral Income History",
+  //       path: "/dashboard/history/referral-income",
+  //     },
+  //     {
+  //       icon: Layers,
+  //       label: "Level Income History",
+  //       path: "/dashboard/history/level-income",
+  //     },
+  //   ],
+  // },
 ];
 
 export default function Sidebar({

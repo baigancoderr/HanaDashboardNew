@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, Search, User, ChevronDown, Menu, LogOut, Network, Wallet, TrendingUp, ShieldCheck } from "lucide-react";
+import { Bell, Search, User, ChevronDown, Menu, LogOut, Network, Wallet, TrendingUp, ShieldCheck, Copy, Check } from "lucide-react";
 import { useAppKit, useAppKitAccount } from "@reown/appkit/react";
 import { useNavigate } from "react-router-dom";
 import { useWeb3 } from "../../context/Web3Context";
@@ -11,6 +11,8 @@ export default function Topbar({
   logoutError,
 }) {
   const [profileOpen, setProfileOpen] = useState(false);
+  const [copiedAddress, setCopiedAddress] = useState(false);
+  const [copyError, setCopyError] = useState("");
   const profileRef = useRef(null);
   const navigate = useNavigate();
   const { open } = useAppKit();
@@ -40,6 +42,22 @@ export default function Topbar({
   const shortenedAddress = address
     ? `${address.slice(0, 6)}...${address.slice(-4)}`
     : "Wallet not connected";
+
+  const handleCopyAddress = async () => {
+    if (!address) return;
+
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopiedAddress(true);
+      setCopyError("");
+      window.setTimeout(() => setCopiedAddress(false), 1800);
+    } catch (error) {
+      setCopiedAddress(false);
+      setCopyError(
+        error instanceof Error ? error.message : "Could not copy wallet address.",
+      );
+    }
+  };
 
   return (
     <header className="flex h-[70px] items-center justify-between border-b border-[#222] bg-[#0A0A0A] px-4 sm:px-6">
@@ -124,9 +142,27 @@ export default function Topbar({
             >
               <div className="border-b border-white/10 px-3 py-2">
                 <p className="text-xs text-[#8A8A8A]">Connected wallet</p>
-                <p className="mt-1 break-all font-mono text-xs text-[#F8E096]">
-                  {address || "Wallet not connected"}
-                </p>
+                <div className="mt-1 flex items-start gap-2">
+                  <p className="min-w-0 flex-1 break-all font-mono text-xs text-[#F8E096]">
+                    {address || "Wallet not connected"}
+                  </p>
+                  {address && (
+                    <button
+                      aria-label={copiedAddress ? "Wallet address copied" : "Copy wallet address"}
+                      className="shrink-0 rounded p-1 text-[#A3A3A3] transition-colors hover:bg-white/5 hover:text-[#FFB51D]"
+                      onClick={handleCopyAddress}
+                      title={copiedAddress ? "Copied!" : "Copy wallet address"}
+                      type="button"
+                    >
+                      {copiedAddress ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                    </button>
+                  )}
+                </div>
+                {copyError && (
+                  <p className="mt-1 text-xs text-red-400" role="alert">
+                    {copyError}
+                  </p>
+                )}
               </div>
               <button
                 className="mt-1 w-full rounded-lg px-3 py-2.5 text-left text-sm text-white transition hover:bg-white/5 hover:text-[#FFB51D]"
