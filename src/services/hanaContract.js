@@ -16,6 +16,7 @@ import { HANA_TOKEN_ABI } from "../contracts/hanaTokenABI";
 import { USDT_ABI } from "../contracts/usdtABI";
 import { HANA_STAKING_ABI } from "../contracts/abis";
 import { getActiveWalletProvider } from "./walletProvider";
+import { readStakingIsRegistered } from "../contracts/registration";
 
 // ======================== ERROR HANDLING ========================
 
@@ -308,8 +309,7 @@ export async function approveUsdt(spenderAddress, amount) {
 // ======================== STAKING — READ ========================
 
 export async function isUserRegistered(address) {
-  const contract = getStakingContract(readProvider);
-  return contract.isRegistered(address);
+  return readStakingIsRegistered(address);
 }
 
 export async function getUserData(address) {

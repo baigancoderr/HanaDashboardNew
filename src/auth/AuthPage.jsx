@@ -25,10 +25,6 @@ import {
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import logo from "../assets/logo.png";
 import {
-  referralStorageKey,
-  dummyRegistrationStorageKey,
-} from "../dashboard/referralStorage";
-import {
   useIsRegistered,
   useRegisterWallet,
 } from "../contracts/hooks";
@@ -60,6 +56,7 @@ export default function AuthPage({ mode }) {
   // On-chain registration checks and register action
   const {
     isRegistered,
+    isReady: registrationReady,
     isLoading: isCheckingRegistration,
     refetch: refetchRegistration,
   } = useIsRegistered(address);
@@ -120,6 +117,7 @@ export default function AuthPage({ mode }) {
     setLocalError("");
     if (isConnected && address) {
       if (!isRegister) {
+        if (!registrationReady) return;
         if (isRegistered) {
           navigate("/dashboard");
         } else {
@@ -349,7 +347,7 @@ export default function AuthPage({ mode }) {
 
             {/* Registration State or Form */}
             {isRegister ? (
-              isConnected && isRegistered ? (
+              isConnected && registrationReady && isRegistered ? (
                 <div className="hana-auth__form">
                   <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-4 text-center">
                     <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
@@ -431,7 +429,11 @@ export default function AuthPage({ mode }) {
                           isCheckingRegistration
                         }
                       >
-                        {registerStep === "submitting" || registerStep === "confirming" ? (
+                        {isCheckingRegistration ? (
+                          <>
+                            <Loader2 size={18} className="animate-spin" /> Checking registration...
+                          </>
+                        ) : registerStep === "submitting" || registerStep === "confirming" ? (
                           <>
                             <Loader2 size={18} className="animate-spin" /> Registering on BSC...
                           </>
@@ -491,12 +493,14 @@ export default function AuthPage({ mode }) {
                 <div className="hana-auth__actions">
                   <button
                     className="hana-auth__submit"
-                    disabled={pending || isCheckingRegistration}
+                    disabled={pending || (isConnected && !registrationReady)}
                     onClick={handleConnect}
                     type="button"
                   >
                     {pending
                       ? "Waiting for wallet..."
+                      : isConnected && !registrationReady
+                      ? "Checking registration..."
                       : isConnected
                       ? isRegistered
                         ? "Enter Dashboard"

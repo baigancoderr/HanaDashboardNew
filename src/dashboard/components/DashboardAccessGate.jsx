@@ -12,7 +12,7 @@ export default function DashboardAccessGate({ children }) {
   const [isSwitching, setIsSwitching] = useState(false);
   // Give AppKit a moment to hydrate before redirecting
   const [isInitializing, setIsInitializing] = useState(true);
-  const { isRegistered, isLoading, isError } = useIsRegistered(address);
+  const { isRegistered, isLoading, isReady } = useIsRegistered(address);
 
   useEffect(() => {
     // After first render cycle, AppKit will have restored wallet state
@@ -50,17 +50,13 @@ export default function DashboardAccessGate({ children }) {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || !isReady) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-black p-6 text-center text-white font-chakra-petch">
         <Loader2 className="mb-4 h-8 w-8 animate-spin text-[#FFB51D]" />
-        <p className="text-sm text-neutral-400">Verifying account on BSC Testnet...</p>
+        <p className="text-sm text-neutral-400">Verifying account on the current staking contract...</p>
       </div>
     );
-  }
-
-  if (isError && !isRegistered) {
-    return <Navigate to="/register" replace />;
   }
 
   if (!isRegistered) {

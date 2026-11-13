@@ -61,6 +61,7 @@ export function Web3Provider({ children }) {
   // Status & notifications
   const [isLoading, setIsLoading] = useState(true);
   const hasLoadedAddress = useRef(false);
+  const activeAddressRef = useRef(null);
   const [isTransacting, setIsTransacting] = useState(false);
   const [txMessage, setTxMessage] = useState("");
   const [toast, setToast] = useState(null);
@@ -72,8 +73,11 @@ export function Web3Provider({ children }) {
 
   // Fetch all user and protocol data from contract
   const refreshData = useCallback(async () => {
+    const requestedAddress = address || null;
+    activeAddressRef.current = requestedAddress;
+    const stillCurrent = () => activeAddressRef.current === requestedAddress;
     const shouldShowLoading =
-      !hasLoadedAddress.current || hasLoadedAddress.current !== (address || null);
+      !hasLoadedAddress.current || hasLoadedAddress.current !== requestedAddress;
 
     try {
       if (shouldShowLoading) setIsLoading(true);
@@ -120,7 +124,8 @@ export function Web3Provider({ children }) {
       }
 
       // 2. Fetch user-specific data if wallet connected
-      if (address) {
+      if (requestedAddress) {
+        setIsRegistered(false);
         const [
           hanaBalRes,
           usdtBalRes,
@@ -129,19 +134,21 @@ export function Web3Provider({ children }) {
           userDataRes,
           stakesRes,
         ] = await Promise.allSettled([
-          hanaService.getHanaBalance(address),
-          hanaService.getUsdtBalance(address),
-          hanaService.getBnbBalance(address),
-          hanaService.isUserRegistered(address),
-          hanaService.getUserData(address),
-          hanaService.getUserStakes(address),
+          hanaService.getHanaBalance(requestedAddress),
+          hanaService.getUsdtBalance(requestedAddress),
+          hanaService.getBnbBalance(requestedAddress),
+          hanaService.isUserRegistered(requestedAddress),
+          hanaService.getUserData(requestedAddress),
+          hanaService.getUserStakes(requestedAddress),
         ]);
+
+        if (!stillCurrent()) return;
 
         if (hanaBalRes.status === "fulfilled") setHanaBalance(hanaBalRes.value);
         if (usdtBalRes.status === "fulfilled") setUsdtBalance(usdtBalRes.value);
         if (bnbBalRes.status === "fulfilled") setBnbBalance(bnbBalRes.value);
 
-        setIsRegistered(isRegRes.status === "fulfilled" && Boolean(isRegRes.value));
+        setIsRegistered(isRegRes.status === "fulfilled" && isRegRes.value === true);
 
         if (userDataRes.status === "fulfilled" && userDataRes.value) {
           const d = userDataRes.value;
@@ -181,7 +188,7 @@ export function Web3Provider({ children }) {
               let pending = "0.00";
               if (st.active) {
                 try {
-                  pending = await hanaService.getPendingROI(address, st.index);
+                  pending = await hanaService.getPendingROI(requestedAddress, st.index);
                 } catch {
                   pending = "0.00";
                 }
@@ -189,6 +196,7 @@ export function Web3Provider({ children }) {
               return { ...st, pendingROI: pending };
             })
           );
+          if (!stillCurrent()) return;
           setUserStakes(enrichedStakes);
 
           const sumPending = enrichedStakes.reduce(
@@ -223,8 +231,8 @@ export function Web3Provider({ children }) {
     } catch (error) {
       console.warn("refreshData error:", error);
     } finally {
-      if (shouldShowLoading) {
-        hasLoadedAddress.current = address || null;
+      if (shouldShowLoading && stillCurrent()) {
+        hasLoadedAddress.current = requestedAddress;
         setIsLoading(false);
       }
     }

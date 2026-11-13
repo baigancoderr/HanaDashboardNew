@@ -7,7 +7,9 @@ export const BSC_TESTNET_RPC_FALLBACK = "https://data-seed-prebsc-1-s1.binance.o
 export const BSC_TESTNET_ARCHIVE_RPC = "https://bnb-testnet.api.onfinality.io/public";
 
 // Deployment block for staking contract 0xd30fc86F7Cfe7e324DB2d294E57a4112eE8C88D7
-export const CONTRACT_START_BLOCK = 140760000;
+// Constructor emits Registered for the owner in this block. Do not scan earlier
+// blocks — those belong to the previous staking contracts.
+export const CONTRACT_START_BLOCK = 142454750;
 
 let _readOnlyProvider = null;
 export const getReadOnlyProvider = () => {

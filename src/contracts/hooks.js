@@ -27,9 +27,9 @@ import {
 } from "./config";
 import { HANA_STAKING_ABI, ERC20_ABI, HANA_TOKEN_ABI } from "./abis";
 import {
-  dummyRegistrationStorageKey,
   referralStorageKey,
 } from "../dashboard/referralStorage";
+import { readStakingIsRegistered } from "./registration";
 
 /**
  * Check if a wallet is registered on the Staking Contract
@@ -38,55 +38,69 @@ export function useIsRegistered(address) {
   const [onChainRegistered, setOnChainRegistered] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
+  const [checkedAddress, setCheckedAddress] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const isAddrValid = Boolean(address && isAddress(address));
   const normalizedAddr = isAddrValid ? getAddress(address) : null;
 
-  const localRegistered =
-    typeof window !== "undefined" && normalizedAddr
-      ? localStorage.getItem(dummyRegistrationStorageKey(normalizedAddr)) ===
-        "true"
-      : false;
+  const refetch = useCallback(async () => {
+    setReloadKey((key) => key + 1);
+  }, []);
 
-  const fetchStatus = useCallback(async () => {
+  useEffect(() => {
+    let cancelled = false;
+
     if (!normalizedAddr) {
       setOnChainRegistered(false);
+      setCheckedAddress(null);
       setIsLoading(false);
-      return;
+      setIsError(false);
+      return undefined;
     }
 
+    // Drop the previous wallet immediately. A stale `true` was opening the
+    // dashboard for old users whose new-contract isRegistered is false.
+    setOnChainRegistered(false);
+    setCheckedAddress(null);
     setIsLoading(true);
     setIsError(false);
 
-    try {
-      const provider = getReadOnlyProvider();
-      const staking = new Contract(
-        CONTRACT_ADDRESSES.stakingContract,
-        HANA_STAKING_ABI,
-        provider
-      );
-      const registered = await staking.isRegistered(normalizedAddr);
-      setOnChainRegistered(Boolean(registered));
-    } catch (err) {
-      console.warn("Could not check on-chain registration:", err);
-      setIsError(true);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [normalizedAddr]);
+    (async () => {
+      try {
+        const registered = await readStakingIsRegistered(normalizedAddr);
+        if (cancelled) return;
+        setOnChainRegistered(registered === true);
+        setCheckedAddress(normalizedAddr);
+      } catch (err) {
+        console.warn("Could not check on-chain registration:", err);
+        if (cancelled) return;
+        setOnChainRegistered(false);
+        setCheckedAddress(normalizedAddr);
+        setIsError(true);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
 
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
+    return () => {
+      cancelled = true;
+    };
+  }, [normalizedAddr, reloadKey]);
 
-  const isRegistered = Boolean(onChainRegistered || localRegistered);
+  const isReady =
+    !isLoading &&
+    (normalizedAddr == null || checkedAddress === normalizedAddr);
+  const isRegistered = isReady && onChainRegistered === true;
 
   return {
     isRegistered,
-    onChainRegistered,
-    isLoading,
+    onChainRegistered: isRegistered,
+    isReady,
+    checkedAddress,
+    isLoading: Boolean(normalizedAddr) && !isReady,
     isError,
-    refetch: fetchStatus,
+    refetch,
   };
 }
 
@@ -172,7 +186,7 @@ const txRoiClaimCache = new Map();
 
 // ─── Unified Hybrid Contract Log Sync Store ──────────────────────────────────
 const stakingIface = new Interface(HANA_STAKING_ABI);
-const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v3_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
+const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v4_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
 const TAIL_BLOCK_SPAN = 49999;
 const ARCHIVE_CHUNK_SPAN = 9999; // 10,000 blocks inclusive (OnFinality max)
 const ARCHIVE_CHUNK_DELAY_MS = 700;
@@ -308,10 +322,27 @@ function persistLogSyncStore() {
   }
 }
 
+function purgeLegacyLogCaches() {
+  if (typeof window === "undefined") return;
+  try {
+    const staleKeys = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith("hana_staking_logs") && key !== LOG_SYNC_STORAGE_KEY) {
+        staleKeys.push(key);
+      }
+    }
+    staleKeys.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // Ignore private mode / quota failures
+  }
+}
+
 function initLogSyncStore() {
   if (logSyncStore.initialized) return;
   logSyncStore.initialized = true;
   if (typeof window === "undefined") return;
+  purgeLegacyLogCaches();
 
   try {
     const rawJson = window.localStorage.getItem(LOG_SYNC_STORAGE_KEY);
@@ -1054,12 +1085,6 @@ export function useRegisterWallet() {
         }
 
         let finalReferrer = ZERO_ADDRESS;
-        const readProvider = getReadOnlyProvider();
-        const stakingRead = new Contract(
-          CONTRACT_ADDRESSES.stakingContract,
-          HANA_STAKING_ABI,
-          readProvider
-        );
 
         if (referrerAddress && referrerAddress.trim() !== "") {
           const clean = referrerAddress.trim();
@@ -1072,8 +1097,8 @@ export function useRegisterWallet() {
             throw new Error("You cannot refer yourself.");
           }
 
-          // Check if referrer is registered on-chain
-          const isRefRegistered = await stakingRead.isRegistered(finalReferrer);
+          // Check if referrer is registered on the current staking contract
+          const isRefRegistered = await readStakingIsRegistered(finalReferrer);
 
           if (!isRefRegistered) {
             throw new Error(
@@ -1085,7 +1110,7 @@ export function useRegisterWallet() {
             finalReferrer = "0x0000000000000000000000000000000000000000";
           } else if (finalReferrer !== "0x0000000000000000000000000000000000000000") {
             try {
-              const isDefaultReg = await stakingRead.isRegistered(finalReferrer);
+              const isDefaultReg = await readStakingIsRegistered(finalReferrer);
               if (!isDefaultReg) {
                 finalReferrer = "0x0000000000000000000000000000000000000000";
               }
@@ -1113,11 +1138,6 @@ export function useRegisterWallet() {
         await tx.wait(1);
         void syncStakingContractLogs({ forceRecent: true });
 
-        // Save local state for instant responsiveness
-        localStorage.setItem(
-          dummyRegistrationStorageKey(userAddress),
-          "true"
-        );
         if (finalReferrer !== ZERO_ADDRESS) {
           localStorage.setItem(
             referralStorageKey(userAddress),
