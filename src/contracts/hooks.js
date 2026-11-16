@@ -30,6 +30,12 @@ import {
   referralStorageKey,
 } from "../dashboard/referralStorage";
 import { readStakingIsRegistered } from "./registration";
+import {
+  RANK_ACHIEVEMENT_STRUCTURE,
+  calculateUserRankStatus,
+} from "./ranks";
+
+export { RANK_ACHIEVEMENT_STRUCTURE, calculateUserRankStatus };
 
 /**
  * Check if a wallet is registered on the Staking Contract
@@ -2919,8 +2925,18 @@ export function useTeamByLevel(address) {
  * Pure helper to compute Strong Leg, Weak Legs, Matching Business, and per-leg breakdown
  * from decoded Registered + Staked contract events.
  */
-export function computeTeamLegBusiness(events, rootAddress, timestampLookup = null) {
+export function computeTeamLegBusiness(
+  events,
+  rootAddress,
+  timestampLookup = null,
+  overrideSelfContribution = 0
+) {
   if (!rootAddress || !isAddress(rootAddress)) {
+    const emptyRankStatus = calculateUserRankStatus({
+      selfContribution: 0,
+      directTeam: 0,
+      matchingBusiness: 0,
+    });
     return {
       legs: [],
       strongLeg: null,
@@ -2934,6 +2950,8 @@ export function computeTeamLegBusiness(events, rootAddress, timestampLookup = nu
       qualifiedTwoLegs: false,
       strongLegRatioPct: 0,
       weakLegRatioPct: 0,
+      selfContribution: 0,
+      ...emptyRankStatus,
     };
   }
 
@@ -3026,6 +3044,42 @@ export function computeTeamLegBusiness(events, rootAddress, timestampLookup = nu
     const activeMemberCount = directIsActive + activeDownlineMembers;
     const timestamp = timestampLookup ? timestampLookup.get(child.blockNumber) || null : null;
 
+    // Calculate matching business for this direct leg to determine its rank
+    const childDirects = childrenByReferrer.get(childLower) || [];
+    let childMatchingBusiness = 0;
+    if (childDirects.length >= 2) {
+      const subLegSums = childDirects
+        .map((sc) => {
+          const scLower = sc.address.toLowerCase();
+          let subSum = stakeStatsByUser.get(scLower)?.totalStakedWei || 0n;
+          const subVis = new Set([rootLower, childLower, scLower]);
+          const subQ = [...(childrenByReferrer.get(scLower) || [])];
+          while (subQ.length > 0) {
+            const m = subQ.shift();
+            const ml = m.address.toLowerCase();
+            if (subVis.has(ml)) continue;
+            subVis.add(ml);
+            subSum += stakeStatsByUser.get(ml)?.totalStakedWei || 0n;
+            const deeper = childrenByReferrer.get(ml) || [];
+            for (const d of deeper) {
+              if (!subVis.has(d.address.toLowerCase())) subQ.push(d);
+            }
+          }
+          return Number(formatEther(subSum));
+        })
+        .sort((a, b) => b - a);
+
+      const strongSub = subLegSums[0] || 0;
+      const weakSub = subLegSums.slice(1).reduce((s, x) => s + x, 0);
+      childMatchingBusiness = Math.min(strongSub, weakSub);
+    }
+
+    const legRankStatus = calculateUserRankStatus({
+      selfContribution: directStaked,
+      directTeam: childDirects.length,
+      matchingBusiness: childMatchingBusiness,
+    });
+
     return {
       address: child.address,
       addressShort: `${child.address.slice(0, 6)}...${child.address.slice(-4)}`,
@@ -3049,6 +3103,8 @@ export function computeTeamLegBusiness(events, rootAddress, timestampLookup = nu
       downlineMembers,
       activeMemberCount,
       isActiveLeg: totalLegBusiness > 0,
+      rankId: legRankStatus.currentRankId,
+      rankName: legRankStatus.currentRankName,
     };
   });
 
@@ -3078,6 +3134,23 @@ export function computeTeamLegBusiness(events, rootAddress, timestampLookup = nu
   const matchingBusiness = Math.min(strongLegBusiness, weakLegBusiness);
   const activeLegsCount = legs.filter((l) => l.isActiveLeg).length;
 
+  const legHighestRankIds = legs.map((l) => l.rankId || 0);
+  const rootStats = stakeStatsByUser.get(rootLower);
+  const eventSelfContribution = rootStats
+    ? Number(formatEther(rootStats.totalStakedWei))
+    : 0;
+  const finalSelfContribution = Math.max(
+    eventSelfContribution,
+    Number(overrideSelfContribution || 0)
+  );
+
+  const rankStatus = calculateUserRankStatus({
+    selfContribution: finalSelfContribution,
+    directTeam: legs.length,
+    matchingBusiness,
+    legHighestRankIds,
+  });
+
   return {
     legs,
     strongLeg,
@@ -3093,14 +3166,18 @@ export function computeTeamLegBusiness(events, rootAddress, timestampLookup = nu
       totalTeamBusiness > 0 ? (strongLegBusiness / totalTeamBusiness) * 100 : 0,
     weakLegRatioPct:
       totalTeamBusiness > 0 ? (weakLegBusiness / totalTeamBusiness) * 100 : 0,
+    selfContribution: finalSelfContribution,
+    ...rankStatus,
   };
 }
 
 /**
  * Compute Strong Leg vs Weak Leg business breakdown for Rank Incentives from event logs
  */
-export function useTeamLegBusiness(address) {
-  const [data, setData] = useState(() => computeTeamLegBusiness([], null));
+export function useTeamLegBusiness(address, { selfContribution: overrideSelfContribution } = {}) {
+  const [data, setData] = useState(() =>
+    computeTeamLegBusiness([], null, null, overrideSelfContribution)
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const { dataRevision, isSyncingHistory, syncProgress } =
@@ -3112,7 +3189,7 @@ export function useTeamLegBusiness(address) {
   const fetchLegBusiness = useCallback(
     async (forceRefresh = false) => {
       if (!normalizedAddr) {
-        setData(computeTeamLegBusiness([], null));
+        setData(computeTeamLegBusiness([], null, null, overrideSelfContribution));
         setError("");
         setIsLoading(false);
         return;
@@ -3139,7 +3216,8 @@ export function useTeamLegBusiness(address) {
         const computed = computeTeamLegBusiness(
           events,
           normalizedAddr,
-          blockCache
+          blockCache,
+          overrideSelfContribution
         );
         setData(computed);
       } catch (err) {
@@ -3153,7 +3231,7 @@ export function useTeamLegBusiness(address) {
         setIsLoading(false);
       }
     },
-    [normalizedAddr, dataRevision]
+    [normalizedAddr, dataRevision, overrideSelfContribution]
   );
 
   useEffect(() => {
