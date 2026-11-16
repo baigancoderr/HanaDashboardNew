@@ -6,6 +6,8 @@
  * Currently set to false (Testnet) for development.
  */
 
+import { CONTRACT_ADDRESSES } from "../contracts/config";
+
 export const USE_MAINNET = false;
 
 // ======================== RPC URLs ========================
@@ -63,7 +65,7 @@ export const BSC_MAINNET = {
 export const CONTRACTS_TESTNET = {
   hanaToken: "0xdF8Bb2Fb2329B17F8C3a8c6B2a97c3372Bd7fa16",
   usdt: "0x544E83aC9Fa1D0e29E95eBBd1B35A4F2798D81Ea",
-  stakingContract: "0xd30fc86F7Cfe7e324DB2d294E57a4112eE8C88D7",
+  stakingContract: CONTRACT_ADDRESSES.stakingContract,
 };
 
 export const CONTRACTS_MAINNET = {

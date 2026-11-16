@@ -716,18 +716,11 @@ export default function Staking() {
                       step="any"
                       min={selectedPkg.minAmount}
                       value={stakeAmount}
-                      onChange={(e) => setStakeAmount(e.target.value)}
+                      readOnly
                       disabled={stakeStep !== "idle" && stakeStep !== "error"}
-                      className="w-full rounded-xl border border-white/20 bg-black/60 px-4 py-3 text-white focus:border-[#FFB51D] focus:outline-none"
+                      className="w-full rounded-xl border border-white/20 bg-black/60 px-4 py-3 text-white focus:border-[#FFB51D] focus:outline-none read-only:cursor-not-allowed"
                       placeholder={`Minimum $${selectedPkg.minAmount}`}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setStakeAmount(usdtBalanceNum.toString())}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded bg-white/10 px-2 py-1 text-[10px] font-bold text-[#FFB51D] hover:bg-white/20"
-                    >
-                      MAX
-                    </button>
                   </div>
                   <p className="mt-1 text-[11px] text-neutral-400">
                     Minimum required: ${selectedPkg.minAmount} USDT
