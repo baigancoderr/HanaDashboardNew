@@ -43,7 +43,7 @@ export const CONTRACT_ADDRESSES = {
   // USDT Token (Testnet - DUSDT)
   usdtToken: "0x544E83aC9Fa1D0e29E95eBBd1B35A4F2798D81Ea",
   // HANA Staking Contract (Testnet)
-  stakingContract: "0xb78032e31a78DEf8D9E20C8A055815DebAD97F10",
+  stakingContract: "0xA73e7D9fF5e274204C21Cd30284Dfd257713e551",
 };
 
 export const ZERO_ADDRESS = "0x42EC3cf99Bbc169C1d22c70339b5625A993CC033";
