@@ -9,7 +9,7 @@ const navLinks = [
   { name: "About Us", href: "#about" },
   { name: "How It Works", href: "#how-it-works" },
   { name: "DSE", href: "#dse" },
-  { name: "Team", href: "#team" },
+  // { name: "Team", href: "#team" },
   { name: "Token", href: "#token" },
   { name: "Ecosystem", href: "#ecosystem" },
   { name: "Roadmap", href: "#roadmap" },

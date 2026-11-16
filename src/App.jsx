@@ -64,7 +64,7 @@ function LandingPage() {
         {/* <SectionReveal><Ecosystem /></SectionReveal> */}
         <SectionReveal><HanaFeatures /></SectionReveal>
         <SectionReveal><Roadmap /></SectionReveal>
-        <SectionReveal><Team /></SectionReveal>
+        {/* <SectionReveal><Team /></SectionReveal> */}
         <SectionReveal><FAQ /></SectionReveal>
         <SectionReveal><ContractAddress /></SectionReveal>
         <SectionReveal><JoinUs /></SectionReveal>
