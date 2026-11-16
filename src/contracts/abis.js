@@ -12,7 +12,6 @@ export const HANA_STAKING_ABI = [
     stateMutability: "nonpayable",
     inputs: [
       { name: "packageId", type: "uint256" },
-      { name: "amount", type: "uint256" },
     ],
     outputs: [],
   },

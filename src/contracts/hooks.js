@@ -1183,18 +1183,51 @@ export function useStakeTokens() {
   const { walletProvider } = useAppKitProvider("eip155");
 
   const stake = useCallback(
-    async (userAddress, packageId, amountUsdt) => {
+    async (userAddressOrPkgId, packageIdMaybe, amountUsdtMaybe) => {
       setError("");
       setStep("checking");
 
       try {
-        if (!userAddress || !isAddress(userAddress)) {
-          throw new Error("Please connect your wallet first.");
-        }
-
         if (!walletProvider) {
           throw new Error("No wallet provider detected. Please reconnect your wallet.");
         }
+
+        const browserProvider = new BrowserProvider(walletProvider);
+        const signer = await browserProvider.getSigner();
+
+        // Support flexible call patterns:
+        // Pattern A: stake(userAddress, packageId, amountUsdt)
+        // Pattern B: stake(packageId, amountUsdt)
+        // Pattern C: stake(packageId)
+        let resolvedUserAddress = userAddressOrPkgId;
+        let resolvedPackageId = packageIdMaybe;
+        let resolvedAmount = amountUsdtMaybe;
+
+        if (
+          typeof userAddressOrPkgId === "number" ||
+          (typeof userAddressOrPkgId === "string" && !isAddress(userAddressOrPkgId))
+        ) {
+          resolvedPackageId = userAddressOrPkgId;
+          resolvedAmount = packageIdMaybe;
+          resolvedUserAddress = await signer.getAddress();
+        }
+
+        if (!resolvedUserAddress || !isAddress(resolvedUserAddress)) {
+          resolvedUserAddress = await signer.getAddress();
+        }
+
+        if (!resolvedUserAddress || !isAddress(resolvedUserAddress)) {
+          throw new Error("Please connect your wallet first.");
+        }
+
+        const packageIndex = Number(resolvedPackageId);
+        const pkgConfig = DEFAULT_PACKAGES[packageIndex];
+        const finalAmount =
+          resolvedAmount !== undefined &&
+          resolvedAmount !== null &&
+          !isNaN(Number(resolvedAmount))
+            ? Number(resolvedAmount)
+            : (pkgConfig?.minAmount ?? 50);
 
         const currentChainId = Number(chainId);
         if (currentChainId !== BSC_TESTNET_CHAIN_ID && switchNetwork) {
@@ -1207,9 +1240,7 @@ export function useStakeTokens() {
           }
         }
 
-        const browserProvider = new BrowserProvider(walletProvider);
-        const signer = await browserProvider.getSigner();
-        const amountWei = parseEther(amountUsdt.toString());
+        const amountWei = parseEther(finalAmount.toString());
 
         const usdt = new Contract(
           CONTRACT_ADDRESSES.usdtToken,
@@ -1218,18 +1249,18 @@ export function useStakeTokens() {
         );
 
         // Check balance
-        const balance = await usdt.balanceOf(getAddress(userAddress));
+        const balance = await usdt.balanceOf(getAddress(resolvedUserAddress));
         if (balance < amountWei) {
           throw new Error(
             `Insufficient USDT balance. You have ${formatEther(
               balance
-            )} USDT but need ${amountUsdt} USDT.`
+            )} USDT but need ${finalAmount} USDT.`
           );
         }
 
         // Check allowance
         const allowance = await usdt.allowance(
-          getAddress(userAddress),
+          getAddress(resolvedUserAddress),
           CONTRACT_ADDRESSES.stakingContract
         );
 
@@ -1243,7 +1274,7 @@ export function useStakeTokens() {
           setStep("approved");
         }
 
-        // Execute stake
+        // Execute stake on active contract: stake(packageId)
         setStep("staking");
         const staking = new Contract(
           CONTRACT_ADDRESSES.stakingContract,
@@ -1251,7 +1282,7 @@ export function useStakeTokens() {
           signer
         );
 
-        const stakeTx = await staking.stake(BigInt(packageId), amountWei);
+        const stakeTx = await staking.stake(BigInt(packageIndex));
         setTxHash(stakeTx.hash);
         setStep("confirming");
 

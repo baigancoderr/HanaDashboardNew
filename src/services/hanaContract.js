@@ -15,6 +15,7 @@ import { BSC, CONTRACTS } from "../config/contracts";
 import { HANA_TOKEN_ABI } from "../contracts/hanaTokenABI";
 import { USDT_ABI } from "../contracts/usdtABI";
 import { HANA_STAKING_ABI } from "../contracts/abis";
+import { DEFAULT_PACKAGES } from "../contracts/config";
 import { getActiveWalletProvider } from "./walletProvider";
 import { readStakingIsRegistered } from "../contracts/registration";
 
@@ -450,7 +451,12 @@ export async function registerUser(referrerAddress) {
 
 export async function stakeTokens(packageId, amount) {
   const signer = await getSigner();
-  const amountWei = ethers.parseEther(amount.toString());
+  const packageIndex = Number(packageId);
+  const resolvedAmount =
+    amount !== undefined && amount !== null && !isNaN(Number(amount))
+      ? Number(amount)
+      : (DEFAULT_PACKAGES[packageIndex]?.minAmount ?? 50);
+  const amountWei = ethers.parseEther(resolvedAmount.toString());
 
   // Approve USDT for staking contract
   const usdtContract = getUsdtContract(signer);
@@ -462,9 +468,9 @@ export async function stakeTokens(packageId, amount) {
     await approveTx.wait();
   }
 
-  // Stake
+  // Stake on active contract: stake(packageId)
   const contract = getStakingContract(signer);
-  const tx = await contract.stake(packageId, amountWei);
+  const tx = await contract.stake(packageIndex);
   const receipt = await tx.wait();
   return receipt;
 }
