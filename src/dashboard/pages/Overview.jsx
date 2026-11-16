@@ -253,7 +253,7 @@ export default function Overview() {
           icon={Coins}
           label="Withdrawable Amount"
           value={`${parseFloat(user?.hanaBalanceFormatted || "0").toLocaleString(undefined, { maximumFractionDigits: 2 })} `}
-          sub="HANA balance from staking contract"
+          sub="HANA balance "
           color="blue"
         />
 

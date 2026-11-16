@@ -40,7 +40,7 @@ export default function Topbar({
   }, []);
 
   const shortenedAddress = address
-    ? `${address.slice(0, 6)}...${address.slice(-4)}`
+    ? `${address.slice(0, 6)}........${address.slice(-6)}`
     : "Wallet not connected";
 
   const handleCopyAddress = async () => {
@@ -144,7 +144,7 @@ export default function Topbar({
                 <p className="text-xs text-[#8A8A8A]">Connected wallet</p>
                 <div className="mt-1 flex items-start gap-2">
                   <p className="min-w-0 flex-1 break-all font-mono text-xs text-[#F8E096]">
-                    {address || "Wallet not connected"}
+                    {shortenedAddress}
                   </p>
                   {address && (
                     <button

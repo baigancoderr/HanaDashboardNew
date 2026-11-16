@@ -56,8 +56,8 @@ export default function StatCard({ icon: Icon, label, value, sub, color = "gold"
             </p>
           )}
         </div>
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${c.icon}`}>
-          <Icon size={18} />
+        <div className={`flex  h-6 w-6 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-xl ${c.icon}`}>
+         <Icon size={18} className="[&]:w-[10px] [&]:h-[10px] md:[&]:w-[18px] md:[&]:h-[18px]" />
         </div>
       </div>
     </div>
