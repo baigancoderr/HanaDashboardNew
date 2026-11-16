@@ -44,6 +44,7 @@ import HanaStability from './Components/HanaStability'
 import DashboardAccessGate from './dashboard/components/DashboardAccessGate'
 import AuthPage from './auth/AuthPage'
 import TokenEconomics from './Components/TokenEconomics'
+import HanaArchitecture from './Components/HanaArchitecture'
 
 // Landing page
 function LandingPage() {
@@ -56,9 +57,10 @@ function LandingPage() {
         <SectionReveal><AboutUs /></SectionReveal>
         <SectionReveal><VisionMission /></SectionReveal>
         <SectionReveal><DSESection /></SectionReveal>
+        <SectionReveal><HanaArchitecture /></SectionReveal>
         {/* <SectionReveal><HanaStability /></SectionReveal> */}
         {/* <SectionReveal><DAOpartner /></SectionReveal> */}
-        <SectionReveal><TokenEconomics /></SectionReveal>
+        {/* <SectionReveal><TokenEconomics /></SectionReveal> */}
         <SectionReveal><Token /></SectionReveal>
         <SectionReveal><Tokonomics /></SectionReveal>
         {/* <SectionReveal><Ecosystem /></SectionReveal> */}
@@ -69,7 +71,7 @@ function LandingPage() {
         <SectionReveal><ContractAddress /></SectionReveal>
         <SectionReveal><JoinUs /></SectionReveal>
         <SectionReveal><Footer /></SectionReveal>
-      </>
+      </>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
     </MotionConfig>
   )
 }

@@ -36,7 +36,7 @@ export default function FAQ() {
   const [openIndex, setOpenIndex] = useState(0);
 
   return (
-    <section className=" overflow-hidden bg-black px-5 py-6 font-chakra-petch text-white sm:px-8 sm:py-6 lg:px-10 lg:py-8">
+    <section className=" overflow-hidden bg-black px-5 py-1 font-chakra-petch text-white sm:px-8 sm:py-6 lg:px-10 lg:py-8">
       <div className="mx-auto grid w-full max-w-[1600px] grid-cols-1 items-start gap-6 md:grid-cols-[1.15fr_0.85fr] lg:gap-10 xl:gap-12">
 
         {/* LEFT: FAQ Accordion */}
