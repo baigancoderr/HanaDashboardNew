@@ -1,5 +1,5 @@
 // HanaStaking Contract ABI
-// Contract: 0xd30fc86F7Cfe7e324DB2d294E57a4112eE8C88D7 (BSC Testnet)
+// BSC Testnet staking contract ABI
 // Source: HanaStaking.sol — Ownable, ReentrancyGuard
 
 export const STAKING_ABI = [
