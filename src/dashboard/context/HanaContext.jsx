@@ -13,6 +13,7 @@ import {
   useLevelIncomeHistory,
   useIncomeHistory,
   useStakingHistory,
+  useWithdrawalHistory,
   useTeamByLevel,
   useTeamLegBusiness,
 } from '../../contracts/hooks';
@@ -24,6 +25,7 @@ import {
   getExplorerAddressUrl,
 } from '../../contracts/config';
 import { RANK_ACHIEVEMENT_STRUCTURE } from '../../contracts/ranks';
+import { calculateWithdrawalFees, isReducedWithdrawalFee } from '../../contracts/withdrawalFees';
 import { useWeb3 } from '../../context/Web3Context';
 
 export const CONTRACT_ADDRESSES = {
@@ -93,6 +95,11 @@ export function HanaProvider({ children }) {
   } = useReferralHistory(address);
   const { incomeHistory: levelEvents, refetch: refetchLevel } = useLevelIncomeHistory(address);
   const { history: stakingHistory, refetch: refetchStakingHistory } = useStakingHistory(address);
+  const {
+    history: withdrawalEvents,
+    error: withdrawalHistoryError,
+    refetch: refetchWithdrawalHistory,
+  } = useWithdrawalHistory(address);
   const { allMembers: teamAllMembers, refetch: refetchTeam } = useTeamByLevel(address);
   const {
     legs: teamLegs,
@@ -354,8 +361,20 @@ export function HanaProvider({ children }) {
           });
         });
     }
+    withdrawalEvents.forEach((tx) => {
+      txList.push({
+        id: tx.id,
+        type: tx.type,
+        amountLabel: tx.amountLabel,
+        txHash: tx.txHash,
+        date: tx.date,
+        status: tx.status,
+        details: tx.details,
+        timestamp: tx.timestamp,
+      });
+    });
     return txList.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-  }, [stakes, stakingHistory, allIncomeEvents]);
+  }, [stakes, stakingHistory, allIncomeEvents, withdrawalEvents]);
 
   // Real Actions
   const stakePackage = useCallback(
@@ -426,7 +445,21 @@ export function HanaProvider({ children }) {
       try {
         showToast('Withdrawal Initiated', `Withdrawing $${amount} USDT...`, 'info');
         const res = await web3?.withdraw?.(amount);
-        showToast('Withdrawal Successful', `$${amount} USDT withdrawn to your wallet.`, 'success');
+        if (!res?.success) {
+          throw new Error(res?.error || 'Could not complete the USDT withdrawal.');
+        }
+        const fees = calculateWithdrawalFees(
+          amount,
+          web3?.withdrawalConfig,
+          isReducedWithdrawalFee(web3?.firstStakeTime)
+        );
+        showToast(
+          'Withdrawal Successful',
+          fees
+            ? `Gross $${Number(amount).toFixed(2)} USDT; estimated net payout $${fees.net.toFixed(2)} after fees.`
+            : `Gross withdrawal of $${Number(amount).toFixed(2)} USDT completed; fee estimate unavailable.`,
+          'success'
+        );
         refetchUser();
         refetchUsdt();
         web3?.refreshData?.();
@@ -445,7 +478,14 @@ export function HanaProvider({ children }) {
         if (!address) throw new Error('Connect your wallet first');
         showToast('Withdrawing HANA', `Submitting withdrawal for ${amount} HANA...`, 'info');
         const res = await executeWithdrawHana(address, amount);
-        showToast('HANA Withdrawn', `${amount} HANA credited to your wallet.`, 'success');
+        const fees = calculateWithdrawalFees(amount, web3?.withdrawalConfig);
+        showToast(
+          'HANA Withdrawn',
+          fees
+            ? `Gross ${Number(amount).toFixed(4)} HANA; estimated net payout ${fees.net.toFixed(4)} HANA after fees.`
+            : `Gross withdrawal of ${Number(amount).toFixed(4)} HANA completed; fee estimate unavailable.`,
+          'success'
+        );
         refetchUser();
         refetchHana();
         web3?.refreshData?.();
@@ -621,6 +661,8 @@ export function HanaProvider({ children }) {
     hanaBalance,
     withdrawableUsdt,
     withdrawableHana,
+    withdrawalConfig: web3?.withdrawalConfig,
+    firstStakeTime: web3?.firstStakeTime || 0,
     totalInvested,
     totalStaked,
     totalEarned,
@@ -635,6 +677,8 @@ export function HanaProvider({ children }) {
     refreshActiveStakes: refetchStakes,
     activeStakesLoading: stakesLoading,
     transactions,
+    withdrawalHistoryError,
+    refetchWithdrawalHistory,
     directIncomeEvents,
     registeredReferrals,
     totalDirectEarnedUsdt,

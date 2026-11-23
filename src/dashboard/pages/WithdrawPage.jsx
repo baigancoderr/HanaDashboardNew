@@ -22,6 +22,51 @@ import {
   TxHashChip,
 } from '../components/common/UiPrimitives';
 import { HanaCoinBadgeIcon, UsdtBadgeIcon } from '../components/common/Icons3D';
+import { calculateWithdrawalFees, isReducedWithdrawalFee } from '../../contracts/withdrawalFees';
+
+function FeeBreakdown({ amount, currency, fees }) {
+  const precision = currency === 'USDT' ? 2 : 4;
+
+  return (
+    <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#0755E8]/25 bg-white/95 p-4">
+      <div className="space-y-1 text-xs">
+        <p className="font-bold text-[#032B91]">Fee Breakdown</p>
+        <div className="flex justify-between">
+          <span className="text-[#0645C5]">Gross Withdrawal</span>
+          <span className="font-bold text-[#061B50] tabular-nums">
+            {currency === 'USDT' ? '$' : ''}{amount.toFixed(precision)} {currency}
+          </span>
+        </div>
+        {fees ? (
+          fees.feeParts.map((part) => (
+            <div className="flex justify-between" key={part.label}>
+              <span className="text-[#0645C5]">
+                {part.label} ({(part.bps / 100).toFixed(2)}%)
+              </span>
+              <span className="font-bold text-red-600 tabular-nums">
+                - {currency === 'USDT' ? '$' : ''}{part.amount.toFixed(precision)} {currency}
+              </span>
+            </div>
+          ))
+        ) : (
+          <p className="text-amber-700">On-chain fee configuration is unavailable.</p>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+        <div>
+          <p className="text-xs font-bold text-[#032B91]">Estimated Net You Receive</p>
+          <p className="font-display text-xl font-extrabold text-emerald-700 tabular-nums">
+            {fees
+              ? `${currency === 'USDT' ? '$' : ''}${fees.net.toFixed(precision)} ${currency}`
+              : 'Unavailable'}
+          </p>
+        </div>
+        <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-600" />
+      </div>
+    </div>
+  );
+}
 
 export function WithdrawPage() {
   const {
@@ -33,6 +78,10 @@ export function WithdrawPage() {
     copyToClipboard,
     withdrawUsdt,
     withdrawHana,
+    withdrawalConfig,
+    firstStakeTime,
+    withdrawalHistoryError,
+    refetchWithdrawalHistory,
   } = useHana();
 
   const [usdtAmount, setUsdtAmount] = useState('');
@@ -41,10 +90,13 @@ export function WithdrawPage() {
   const formRef = useRef(null);
 
   const parsedUsdt = Math.max(0, Number(usdtAmount) || 0);
-  const adminFee = parsedUsdt * 0.025;
-  const daoFee = parsedUsdt * 0.025;
-  const netReceive = Math.max(0, parsedUsdt - adminFee - daoFee);
+  const usdtFees = calculateWithdrawalFees(
+    parsedUsdt,
+    withdrawalConfig,
+    isReducedWithdrawalFee(firstStakeTime)
+  );
   const parsedHana = Math.max(0, Number(hanaAmount) || 0);
+  const hanaFees = calculateWithdrawalFees(parsedHana, withdrawalConfig);
 
   const withdrawalHistory = transactions.filter(
     (t) => t.type === 'Withdraw USDT' || t.type === 'Withdraw HANA'
@@ -78,9 +130,13 @@ export function WithdrawPage() {
         />
         <StatCard
           icon={<ShieldCheck className="h-6 w-6" />}
-          label="Fee Tier"
-          value="5.00%"
-          subtext="Standard Fee"
+          label="HANA Fee Tier"
+          value={hanaFees ? `${(hanaFees.totalFeeBps / 100).toFixed(2)}%` : '—'}
+          subtext={
+            !usdtFees
+              ? 'Fee Config Unavailable'
+              : `USDT: ${(usdtFees.totalFeeBps / 100).toFixed(2)}%${isReducedWithdrawalFee(firstStakeTime) ? ' reduced' : ''}`
+          }
         />
         <StatCard
           icon={<Wallet className="h-6 w-6" />}
@@ -94,7 +150,7 @@ export function WithdrawPage() {
       {/* Main 2-Column Withdrawal Forms */}
       <div ref={formRef} className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         {/* Left: Request Withdrawal (USDT) */}
-        <SectionCard
+        {/* <SectionCard
           className="lg:col-span-6"
           title="Request Withdrawal (USDT)"
           subtitle="Withdraw your earned USDT from the staking contract"
@@ -114,7 +170,7 @@ export function WithdrawPage() {
 
             <div>
               <label className="mb-1.5 block text-xs font-bold text-[#032B91]">
-                Withdrawal Amount (USDT)
+                Gross Withdrawal Amount (USDT)
               </label>
               <div className="flex items-center gap-2 rounded-xl border border-[#0755E8]/30 bg-white px-3 py-1.5 shadow-inner">
                 <span className="font-display text-base font-extrabold text-[#0645C5]">$</span>
@@ -152,48 +208,21 @@ export function WithdrawPage() {
               </div>
             </div>
 
-            {/* Fee Breakdown Box */}
-            <div className="grid grid-cols-1 items-center gap-3 rounded-2xl border border-[#0755E8]/25 bg-white/95 p-4 sm:grid-cols-2">
-              <div className="space-y-1 text-xs">
-                <p className="font-bold text-[#032B91]">Fee Breakdown</p>
-                <div className="flex justify-between">
-                  <span className="text-[#0645C5]">Requested Amount</span>
-                  <span className="font-bold text-[#061B50] tabular-nums">${parsedUsdt.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#0645C5]">Admin Fee (2.50%)</span>
-                  <span className="font-bold text-red-600 tabular-nums">- ${adminFee.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#0645C5]">DAO Pool (2.50%)</span>
-                  <span className="font-bold text-red-600 tabular-nums">- ${daoFee.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 sm:border-l sm:pl-4">
-                <div>
-                  <p className="text-xs font-bold text-[#032B91]">Net You Receive</p>
-                  <p className="font-display text-xl font-extrabold text-emerald-700 tabular-nums">
-                    ${netReceive.toFixed(2)} USDT
-                  </p>
-                </div>
-                <CheckCircle2 className="h-6 w-6 shrink-0 text-emerald-600" />
-              </div>
-            </div>
+            <FeeBreakdown amount={parsedUsdt} currency="USDT" fees={usdtFees} />
 
             <GoldButton
               onClick={() => setModalMode('usdt')}
-              disabled={parsedUsdt <= 0 || parsedUsdt > withdrawableUsdt || parsedUsdt > 10000}
+              disabled={!usdtFees || parsedUsdt <= 0 || parsedUsdt > withdrawableUsdt || parsedUsdt > 10000}
               className="w-full py-3"
             >
               <Send className="h-4 w-4" />
               Confirm Withdrawal
             </GoldButton>
           </div>
-        </SectionCard>
+        </SectionCard> */}
 
         {/* Right: Withdraw HANA + Important Information */}
-        <div className="space-y-5 lg:col-span-6">
+        <div className="grid grid-cols-1 gap-5 lg:col-span-12 lg:grid-cols-2 lg:items-start">
           <SectionCard
             title="Withdraw HANA"
             subtitle="Withdraw HANA credited to your staking balance"
@@ -205,14 +234,14 @@ export function WithdrawPage() {
                 <div>
                   <p className="text-xs font-bold text-[#0645C5]">Withdrawable HANA</p>
                   <p className="font-display text-2xl font-extrabold text-[#061B50] tabular-nums">
-                    {withdrawableHana.toFixed(4)} HANA
+                    {withdrawableHana.toFixed(4)}
                   </p>
                   <p className="text-[11px] font-semibold text-[#0645C5]/80">From your staking account</p>
                 </div>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-xs font-bold text-[#032B91]">HANA Amount</label>
+                <label className="mb-1.5 block text-xs font-bold text-[#032B91]">Gross Withdrawal Amount (HANA)</label>
                 <div className="flex items-center gap-2 rounded-xl border border-[#0755E8]/30 bg-white px-3 py-1.5 shadow-inner">
                   <HanaCoinBadgeIcon size={22} />
                   <input
@@ -234,9 +263,11 @@ export function WithdrawPage() {
                 </div>
               </div>
 
+              <FeeBreakdown amount={parsedHana} currency="HANA" fees={hanaFees} />
+
               <GoldButton
                 onClick={() => setModalMode('hana')}
-                disabled={parsedHana <= 0 || parsedHana > withdrawableHana}
+                disabled={!hanaFees || parsedHana <= 0 || parsedHana > withdrawableHana}
                 className="w-full py-3"
               >
                 <Coins className="h-4 w-4" />
@@ -259,6 +290,10 @@ export function WithdrawPage() {
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
                 <span>Withdrawals are dispatched directly to your connected BNB Smart Chain wallet.</span>
               </li>
+              <li className="flex items-center gap-2.5">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                <span>BNB network gas is separate from the protocol fee deducted from your withdrawal.</span>
+              </li>
             </ul>
           </SectionCard>
         </div>
@@ -267,7 +302,7 @@ export function WithdrawPage() {
       {/* Withdrawal History */}
       <SectionCard title="Recent Withdrawal History" icon={<Clock className="h-4 w-4" />}>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[600px] text-left text-xs">
+          <table className="w-full min-w-[800px] text-left text-xs">
             <thead>
               <tr className="border-b border-[#0755E8]/15 text-[#0645C5]">
                 <th className="py-2 pr-3 font-bold">Type</th>
@@ -279,7 +314,28 @@ export function WithdrawPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#0755E8]/10">
-              {withdrawalHistory.map((tx) => (
+              {withdrawalHistoryError ? (
+                <tr>
+                  <td colSpan={6} className="py-5 text-center text-red-600">
+                    {withdrawalHistoryError}{' '}
+                    <button
+                      type="button"
+                      onClick={refetchWithdrawalHistory}
+                      className="font-bold underline"
+                    >
+                      Retry
+                    </button>
+                  </td>
+                </tr>
+              ) : withdrawalHistory.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-5 text-center text-[#0645C5]">
+                    {walletAddress
+                      ? 'No HANA withdrawals found for this wallet yet.'
+                      : 'Connect your wallet to view withdrawal history.'}
+                  </td>
+                </tr>
+              ) : withdrawalHistory.map((tx) => (
                 <tr key={tx.id} className="hover:bg-[#EAF4FF]/60">
                   <td className="py-2.5 pr-3 font-bold text-[#032B91]">{tx.type}</td>
                   <td className="py-2.5 pr-3 font-extrabold text-[#061B50] tabular-nums">{tx.amountLabel}</td>
@@ -304,10 +360,12 @@ export function WithdrawPage() {
         title={modalMode === 'usdt' ? 'Confirm USDT Withdrawal' : 'Confirm HANA Withdrawal'}
         description={
           modalMode === 'usdt'
-            ? `Withdraw $${parsedUsdt.toFixed(2)} USDT (Net $${netReceive.toFixed(2)} USDT after 5% protocol fee).`
-            : `Withdraw ${parsedHana.toFixed(4)} HANA to your connected wallet.`
+            ? `Withdraw $${parsedUsdt.toFixed(2)} USDT gross (estimated net $${(usdtFees?.net || 0).toFixed(2)} USDT after ${(usdtFees?.totalFeeBps / 100 || 0).toFixed(2)}% fee).`
+            : `Withdraw ${parsedHana.toFixed(4)} HANA gross (estimated net ${(hanaFees?.net || 0).toFixed(4)} HANA after ${(hanaFees?.totalFeeBps / 100 || 0).toFixed(2)}% fee).`
         }
-        confirmLabel={modalMode === 'usdt' ? `Send $${netReceive.toFixed(2)} USDT` : `Send ${parsedHana.toFixed(2)} HANA`}
+        confirmLabel={modalMode === 'usdt'
+          ? `Receive est. $${(usdtFees?.net || 0).toFixed(2)} USDT`
+          : `Receive est. ${(hanaFees?.net || 0).toFixed(4)} HANA`}
         onConfirm={() => {
           if (modalMode === 'usdt') {
             withdrawUsdt(parsedUsdt);

@@ -1604,6 +1604,92 @@ export function useStakingHistory(address) {
   };
 }
 
+export function useWithdrawalHistory(address) {
+  const [history, setHistory] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { dataRevision } = useContractLogSyncStatus();
+
+  const isAddrValid = Boolean(address && isAddress(address));
+  const normalizedAddr = isAddrValid ? getAddress(address) : null;
+
+  const fetchHistory = useCallback(async (forceRefresh = false) => {
+    if (!normalizedAddr) {
+      setHistory([]);
+      setError("");
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+    try {
+      if (forceRefresh) {
+        await syncStakingContractLogs({ forceRecent: true });
+      }
+
+      const provider = getReadOnlyProvider();
+      const staking = new Contract(
+        CONTRACT_ADDRESSES.stakingContract,
+        HANA_STAKING_ABI,
+        provider
+      );
+      const events = await fetchLogsInChunks(
+        staking,
+        staking.filters.TokensWithdrawn(normalizedAddr),
+        CONTRACT_START_BLOCK
+      );
+
+      await populateBlockTimestamps(provider, events);
+      const parsed = events.map((event) => {
+        const netAmount = BigInt(event.args?.netAmount ?? event.args?.[1] ?? 0n);
+        const fee = BigInt(event.args?.fee ?? event.args?.[2] ?? 0n);
+        const timestamp = blockCache.get(event.blockNumber) || null;
+
+        return {
+          id: `withdraw-${event.transactionHash}-${event.index ?? event.logIndex ?? 0}`,
+          type: "Withdraw HANA",
+          amountLabel: `${formatEther(netAmount)} HANA`,
+          txHash: event.transactionHash,
+          date: timestamp
+            ? new Date(timestamp * 1000).toLocaleString("en-US", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : `Block #${event.blockNumber}`,
+          status: "Success",
+          details: `Gross ${formatEther(netAmount + fee)} HANA; fee ${formatEther(fee)} HANA`,
+          timestamp: timestamp || 0,
+          explorerUrl: getExplorerTxUrl(event.transactionHash),
+        };
+      });
+
+      parsed.sort((a, b) => b.timestamp - a.timestamp || b.id.localeCompare(a.id));
+      setHistory(parsed);
+    } catch (err) {
+      console.warn("Could not fetch withdrawal history events:", err);
+      setError(err?.message || "Could not load on-chain withdrawal history.");
+      setHistory([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [normalizedAddr, dataRevision]);
+
+  useEffect(() => {
+    fetchHistory(false);
+  }, [fetchHistory]);
+
+  return {
+    history,
+    isLoading,
+    error,
+    refetch: () => fetchHistory(true),
+  };
+}
+
 /**
  * Read on-chain Referral history:
  * 1. Direct referral rewards from IncomeAllotted (where incomeType == 'direct')
