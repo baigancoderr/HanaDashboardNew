@@ -35,28 +35,28 @@ html {
   font-optical-sizing: auto;
 }
 
-.dashboard-scroll {
+* {
   scrollbar-width: thin;
-  scrollbar-color: #ffb51d #111111;
+  scrollbar-color: #ffd700 #032b91;
 }
 
-.dashboard-scroll::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
 }
 
-.dashboard-scroll::-webkit-scrollbar-track {
-  background: #0a0a0a;
+*::-webkit-scrollbar-track {
+  background: linear-gradient(180deg, #0755e8 0%, #032b91 55%, #061b50 100%);
 }
 
-.dashboard-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #ffe28a 0%, #ffb51d 100%);
+*::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #fff1a8 0%, #ffd700 48%, #ffb800 100%);
   border-radius: 999px;
-  border: 2px solid #0a0a0a;
+  border: 2px solid #032b91;
 }
 
-.dashboard-scroll::-webkit-scrollbar-thumb:hover {
-  background: #ffb51d;
+*::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #ffe98a 0%, #ffd700 45%, #d89500 100%);
 }
 
 /* ========================================================

@@ -12,11 +12,13 @@ import {
   Layers,
   Percent,
   Shield,
+  RefreshCw,
 } from 'lucide-react';
 import { STAKING_PACKAGES, useHana } from '../context/HanaContext';
 import { HANA_IMAGES } from '../assets/images';
 import {
   ConfirmModal,
+  BlueButton,
   GoldButton,
   HeroBanner,
   PackageBadge,
@@ -45,6 +47,8 @@ export function StakingPage() {
     totalStaked,
     totalEarned,
     positions,
+    refreshActiveStakes,
+    activeStakesLoading,
     transactions,
     teamMembers,
     stakePackage,
@@ -211,9 +215,20 @@ export function StakingPage() {
         title="Active Stakes"
         subtitle="Track 2X capping progress and claim accrued ROI rewards"
         icon={<Shield className="h-4 w-4" />}
+        rightSlot={
+          <BlueButton onClick={refreshActiveStakes} disabled={activeStakesLoading}>
+            <RefreshCw className={`h-3.5 w-3.5 ${activeStakesLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </BlueButton>
+        }
       >
         <div className="space-y-4">
-          {positions.length > 0 ? (
+          {activeStakesLoading && positions.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm font-semibold text-[#0645C5]" role="status">
+              <RefreshCw className="h-4 w-4 animate-spin" />
+              Loading active stakes...
+            </div>
+          ) : positions.length > 0 ? (
             positions.map((pos) => {
               const pct = Math.min(100, Math.round((pos.totalClaimed / pos.capAmount) * 100));
               return (

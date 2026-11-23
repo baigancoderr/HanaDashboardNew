@@ -46,7 +46,7 @@ export const STAKING_PACKAGES = DEFAULT_PACKAGES.map((pkg) => ({
   dailyPercent: parseFloat((pkg.dailyRateBps / 100).toFixed(2)),
   capMultiplier: pkg.capMultiplier,
   isDAO: pkg.isDAO,
-  popular: pkg.id === 2 || pkg.id === 3,
+  popular: pkg.id === 3,
   durationDays: 200,
 }));
 
@@ -632,6 +632,8 @@ export function HanaProvider({ children }) {
     daoValidDays,
     daoMembersCount,
     positions,
+    refreshActiveStakes: refetchStakes,
+    activeStakesLoading: stakesLoading,
     transactions,
     directIncomeEvents,
     registeredReferrals,

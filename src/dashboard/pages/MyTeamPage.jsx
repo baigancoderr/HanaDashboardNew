@@ -233,7 +233,7 @@ export function MyTeamPage() {
                 <th className="py-2.5 pr-3 font-bold">Sponsor</th>
                 <th className="py-2.5 pr-3 font-bold">Status</th>
                 <th className="py-2.5 pr-3 font-bold">Total Business</th>
-                <th className="py-2.5 pr-3 font-bold">Last Stake</th>
+                {/* <th className="py-2.5 pr-3 font-bold">Last Stake</th> */}
                 <th className="py-2.5 pr-3 font-bold">Last Package</th>
                 <th className="py-2.5 pr-3 font-bold">Joined</th>
                 <th className="py-2.5 font-bold">Reg Tx</th>
@@ -285,7 +285,7 @@ export function MyTeamPage() {
                     <td className="py-3 pr-3 font-extrabold text-emerald-700 tabular-nums">
                       ${m.totalBusiness.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="py-3 pr-3 font-medium text-[#032B91]">{m.lastStake}</td>
+                    {/* <td className="py-3 pr-3 font-medium text-[#032B91]">{m.lastStake}</td> */}
                     <td className="py-3 pr-3">
                       <PackageBadge tier={m.lastPackage} />
                     </td>
