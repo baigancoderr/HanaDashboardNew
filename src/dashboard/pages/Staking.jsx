@@ -241,9 +241,12 @@ export default function Staking() {
     refetch: refetchStakes,
   } = useUserStakes(address);
 
+  // Staking history from on-chain Staked events
   const {
     stakingHistory,
     isLoading: historyLoading,
+    isSyncingHistory,
+    syncProgress,
     refetch: refetchHistory,
   } = useStakingHistory(address);
 
@@ -307,7 +310,7 @@ export default function Staking() {
     try {
       await executeStake(address, selectedPkg.id, amountNum);
       await refetchStakes();
-      await refetchHistory?.();
+      await refetchHistory();
       await refetchUsdt();
       await refetchHana();
       await refetchUser();
@@ -318,7 +321,7 @@ export default function Staking() {
 
   const handleRefreshAll = () => {
     refetchStakes();
-    refetchHistory?.();
+    refetchHistory();
     refetchUsdt();
     refetchHana();
     refetchUser();
@@ -475,74 +478,82 @@ export default function Staking() {
         )}
       </SectionCard>
 
-      {/* On-Chain Staking History from Event Logs */}
+      {/* Staking History */}
       <SectionCard
-        title="Staking Transaction History"
-        subtitle="Verified on-chain Staked event logs from the BSC Testnet contract"
+        title="Staking History"
+        subtitle="All your on-chain staking transactions"
         action={
           <button
-            onClick={() => refetchHistory?.()}
+            onClick={() => refetchHistory()}
             disabled={historyLoading}
             className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-[#161616] px-3 py-1.5 text-xs font-medium text-neutral-300 hover:border-[#FFB51D]/40 hover:text-white transition disabled:opacity-50 cursor-pointer"
           >
-            <Loader2
-              size={12}
-              className={historyLoading ? "animate-spin" : ""}
-            />
+            <Loader2 size={12} className={historyLoading ? "animate-spin" : ""} />
             Refresh
           </button>
         }
       >
-        {historyLoading ? (
+        {/* Sync progress bar */}
+        {isSyncingHistory && (
+          <div className="mb-4">
+            <div className="mb-1 flex justify-between text-[11px] text-[#737373]">
+              <span>Scanning on-chain events...</span>
+              <span>{syncProgress}%</span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-[#222] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#FFE28A] to-[#FFB51D] transition-all duration-300"
+                style={{ width: `${syncProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {historyLoading && stakingHistory.length === 0 ? (
           <div className="flex items-center justify-center py-10 text-[#FFB51D]">
             <Loader2 size={22} className="animate-spin mr-2" />
-            <span className="text-xs">Querying on-chain staking event logs...</span>
+            <span className="text-xs">Loading staking history...</span>
           </div>
         ) : stakingHistory.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[620px] text-left text-xs">
+            <table className="w-full min-w-[580px] text-left text-xs">
               <thead>
                 <tr className="border-b border-white/10 text-[#737373] uppercase tracking-wider text-[11px]">
-                  <th className="pb-3 font-semibold">Position</th>
-                  <th className="pb-3 font-semibold">Package</th>
-                  <th className="pb-3 font-semibold">Amount</th>
-                  <th className="pb-3 font-semibold">Daily Rate</th>
-                  <th className="pb-3 font-semibold">Date & Time</th>
-                  <th className="pb-3 font-semibold text-right">Transaction Hash</th>
+                  <th className="pb-3 pr-4 font-semibold">#</th>
+                  <th className="pb-3 pr-4 font-semibold">Package</th>
+                  <th className="pb-3 pr-4 font-semibold">Amount</th>
+                  <th className="pb-3 pr-4 font-semibold">Daily Rate</th>
+                  <th className="pb-3 pr-4 font-semibold">Date</th>
+                  <th className="pb-3 font-semibold text-right">Tx Hash</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
                 {stakingHistory.map((item) => (
-                  <tr
-                    key={item.txHash + item.stakeIndex}
-                    className="hover:bg-white/[0.02] transition"
-                  >
-                    <td className="py-3.5 font-medium text-white">
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#FFB51D]/10 text-[11px] font-bold text-[#FFB51D]">
-                          #{item.stakeIndex + 1}
-                        </span>
-                        <span className="text-[#A3A3A3] text-[11px]">
-                          {item.stakeDisplayId}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-3.5">
-                      <span className="font-semibold text-white">
-                        {item.packageName}
+                  <tr key={item.txHash + item.stakeIndex} className="hover:bg-white/[0.02] transition">
+                    <td className="py-3.5 pr-4">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#FFB51D]/10 text-[11px] font-bold text-[#FFB51D]">
+                        #{item.stakeIndex + 1}
                       </span>
                     </td>
-                    <td className="py-3.5">
+                    <td className="py-3.5 pr-4">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">{item.packageName}</span>
+                        {DEFAULT_PACKAGES.find(p => p.id === item.packageId)?.isDAO && (
+                          <span className="rounded-full bg-purple-500/20 border border-purple-500/30 px-1.5 py-0.5 text-[9px] font-bold text-purple-300">DAO</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3.5 pr-4">
                       <span className="font-bold text-[#FFB51D]">
                         ${item.amountNumber.toLocaleString()} USDT
                       </span>
                     </td>
-                    <td className="py-3.5">
+                    <td className="py-3.5 pr-4">
                       <span className="inline-flex items-center rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] font-semibold text-green-400">
                         {item.dailyRate}
                       </span>
                     </td>
-                    <td className="py-3.5 text-[#A3A3A3]">
+                    <td className="py-3.5 pr-4 text-[#A3A3A3]">
                       {item.dateFormatted}
                     </td>
                     <td className="py-3.5 text-right">
@@ -553,8 +564,8 @@ export default function Staking() {
                         className="inline-flex items-center gap-1.5 rounded-lg border border-[#FFB51D]/20 bg-[#FFB51D]/5 px-2.5 py-1 text-xs font-mono font-medium text-[#FFB51D] hover:bg-[#FFB51D]/15 transition"
                         title={item.txHash}
                       >
-                        <span>{item.txShort}</span>
-                        <ExternalLink size={12} />
+                        {item.txShort}
+                        <ExternalLink size={11} />
                       </a>
                     </td>
                   </tr>
@@ -563,14 +574,11 @@ export default function Staking() {
             </table>
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.01] p-6 text-center">
+          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.01] p-8 text-center">
             <Clock size={28} className="mx-auto mb-2 text-neutral-500" />
-            <p className="text-xs font-medium text-white">
-              No Staking Transaction Logs Found
-            </p>
+            <p className="text-xs font-medium text-white">No Staking Transactions Yet</p>
             <p className="mt-1 text-[11px] text-neutral-400">
-              When you stake USDT into any package, the verified on-chain Staked
-              event and BscScan transaction hash will appear here.
+              Your staking transactions will appear here once you stake into any package.
             </p>
           </div>
         )}

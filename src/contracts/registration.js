@@ -35,7 +35,18 @@ export async function readStakingIsRegistered(address) {
     HANA_STAKING_ABI,
     provider
   );
-  const blockTag = await provider.getBlockNumber();
-  const registered = await staking.isRegistered(normalized, { blockTag });
-  return coerceRegisteredFlag(registered);
+  try {
+    const registered = await staking.isRegistered(normalized);
+    return coerceRegisteredFlag(registered);
+  } catch (err) {
+    console.warn("Error reading isRegistered from staking contract:", err);
+    try {
+      const user = await staking.users(normalized);
+      if (user && user.totalStaked && BigInt(user.totalStaked) > 0n) return true;
+      if (user && user.referrer && user.referrer.toLowerCase() !== "0x0000000000000000000000000000000000000000") return true;
+    } catch {
+      // ignore
+    }
+    return false;
+  }
 }

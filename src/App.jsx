@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { MotionConfig } from 'framer-motion'
 import './App.css'
 import { SectionReveal } from './Components/Motion'
@@ -20,31 +20,39 @@ import JoinUs from './Components/JoinUs'
 import HanaProtocol from './Components/HanaProtocol'
 import VisionMission from './Components/VisionMision'
 import HanaFeatures from './Components/HanaFeatures'
-
-// Dashboard
-import DashboardLayout from './dashboard/components/DashboardLayout'
-import Overview from './dashboard/pages/Overview'
-// import Packages from './dashboard/pages/Packages'
-// import ROIIncome from './dashboard/pages/ROIIncome'
-import DirectIncome from './dashboard/pages/DirectIncome'
-import LevelIncome from './dashboard/pages/LevelIncome'
-import RankIncentives from './dashboard/pages/RankIncentives'
-import DAOProgram from './dashboard/pages/DAOProgram'
-// import BurnDSE from './dashboard/pages/BurnDSE'
-import Tokenomics from './dashboard/pages/Tokenomics'
-import Withdrawals from './dashboard/pages/Withdrawals'
-import Compounding from './dashboard/pages/Compounding'
-import Staking from './dashboard/pages/Staking'
-import Settings from './dashboard/pages/Settings'
-import ReferralIncomeHistory from './dashboard/pages/ReferralIncomeHistory'
-import LevelIncomeHistory from './dashboard/pages/LevelIncomeHistory'
-import MyTeam from './dashboard/pages/MyTeam'
 import DSESection from './Components/DSESection'
 import HanaStability from './Components/HanaStability'
-import DashboardAccessGate from './dashboard/components/DashboardAccessGate'
 import AuthPage from './auth/AuthPage'
 import TokenEconomics from './Components/TokenEconomics'
 import HanaArchitecture from './Components/HanaArchitecture'
+
+// Blockchain Dashboard
+import DashboardAccessGate from './dashboard/components/DashboardAccessGate'
+import { HanaProvider } from './dashboard/context/HanaContext'
+import { MainLayout } from './dashboard/components/layout/MainLayout'
+import { DashboardPage } from './dashboard/pages/DashboardPage'
+import { InvestmentPage } from './dashboard/pages/InvestmentPage'
+import { StakingPage } from './dashboard/pages/StakingPage'
+import { CompoundingPage } from './dashboard/pages/CompoundingPage'
+import { DaoPage } from './dashboard/pages/DaoPage'
+import { TokenPage } from './dashboard/pages/TokenPage'
+import { MyTeamPage } from './dashboard/pages/MyTeamPage'
+import { DirectIncomePage } from './dashboard/pages/DirectIncomePage'
+import { LevelIncomePage } from './dashboard/pages/LevelIncomePage'
+import { RewardsPage } from './dashboard/pages/RewardsPage'
+import { RankPage } from './dashboard/pages/RankPage'
+import { WithdrawPage } from './dashboard/pages/WithdrawPage'
+import { TransactionsPage } from './dashboard/pages/TransactionsPage'
+import { EcosystemPage } from './dashboard/pages/EcosystemPage'
+import { SettingsPage } from './dashboard/pages/SettingsPage'
+import {
+  PackagesPage,
+  ReferralPage,
+  IncomeReportPage,
+  RankRewardsPage,
+  ResourcesPage,
+  SupportPage,
+} from './dashboard/pages/SecondaryPages'
 
 // Landing page
 function LandingPage() {
@@ -89,26 +97,39 @@ function App() {
         path="/dashboard"
         element={
           <DashboardAccessGate>
-            <DashboardLayout />
+            <HanaProvider>
+              <MainLayout />
+            </HanaProvider>
           </DashboardAccessGate>
         }
       >
-        <Route index element={<Overview />} />
-        {/* <Route path="packages" element={<Packages />} /> */}
-        {/* <Route path="roi" element={<ROIIncome />} /> */}
-        <Route path="direct-income" element={<DirectIncome />} />
-        <Route path="levels" element={<LevelIncome />} />
-        <Route path="ranks" element={<RankIncentives />} />
-        <Route path="dao" element={<DAOProgram />} />
-        {/* <Route path="dse" element={<BurnDSE />} /> */}
-        <Route path="tokenomics" element={<Tokenomics />} />
-        <Route path="withdrawals" element={<Withdrawals />} />
-        <Route path="compounding" element={<Compounding />} />
-        <Route path="staking" element={<Staking />} />
-        <Route path="settings" element={<Settings />} />
-        <Route path="history/referral-income" element={<ReferralIncomeHistory />} />
-        <Route path="history/level-income" element={<LevelIncomeHistory />} />
-        <Route path="my-team" element={<MyTeam />} />
+        <Route index element={<DashboardPage />} />
+        <Route path="investment" element={<InvestmentPage />} />
+        <Route path="staking" element={<StakingPage />} />
+        <Route path="packages" element={<PackagesPage />} />
+        <Route path="compounding" element={<CompoundingPage />} />
+        <Route path="dao" element={<DaoPage />} />
+        <Route path="token" element={<TokenPage />} />
+        <Route path="tokenomics" element={<TokenPage />} />
+        <Route path="team" element={<MyTeamPage />} />
+        <Route path="my-team" element={<MyTeamPage />} />
+        <Route path="referral" element={<ReferralPage />} />
+        <Route path="direct-income" element={<DirectIncomePage />} />
+        <Route path="level-income" element={<LevelIncomePage />} />
+        <Route path="levels" element={<LevelIncomePage />} />
+        <Route path="income-report" element={<IncomeReportPage />} />
+        <Route path="rewards" element={<RewardsPage />} />
+        <Route path="rank" element={<RankPage />} />
+        <Route path="ranks" element={<RankPage />} />
+        <Route path="rank-rewards" element={<RankRewardsPage />} />
+        <Route path="withdraw" element={<WithdrawPage />} />
+        <Route path="withdrawals" element={<WithdrawPage />} />
+        <Route path="transactions" element={<TransactionsPage />} />
+        <Route path="ecosystem" element={<EcosystemPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="resources" element={<ResourcesPage />} />
+        <Route path="support" element={<SupportPage />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>
   )

@@ -23,9 +23,9 @@ export default function DashboardAccessGate({ children }) {
   // Show loader while AppKit is hydrating
   if (isInitializing) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-black p-6 text-center text-white font-chakra-petch">
-        <Loader2 className="mb-4 h-8 w-8 animate-spin text-[#FFB51D]" />
-        <p className="text-sm text-neutral-400">Loading HANA Dashboard...</p>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#032B91] p-6 text-center text-white">
+        <Loader2 className="mb-4 h-8 w-8 animate-spin text-[#FFD700]" />
+        <p className="text-sm font-semibold text-blue-100">Loading HANA Dashboard...</p>
       </div>
     );
   }
@@ -52,9 +52,9 @@ export default function DashboardAccessGate({ children }) {
 
   if (isLoading || !isReady) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-black p-6 text-center text-white font-chakra-petch">
-        <Loader2 className="mb-4 h-8 w-8 animate-spin text-[#FFB51D]" />
-        <p className="text-sm text-neutral-400">Verifying account on the current staking contract...</p>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#032B91] p-6 text-center text-white">
+        <Loader2 className="mb-4 h-8 w-8 animate-spin text-[#FFD700]" />
+        <p className="text-sm font-semibold text-blue-100">Verifying account on HANA staking contract...</p>
       </div>
     );
   }

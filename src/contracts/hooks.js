@@ -144,20 +144,28 @@ export function useUserData(address) {
         referrer: data[0],
         totalStaked: data[1],
         totalStakedFormatted: formatEther(data[1] || 0n),
+        totalStakedNumber: Number(formatEther(data[1] || 0n)),
+        totalInvestedNumber: Number(formatEther(data[1] || 0n)),
         totalROIClaimed: data[2],
         totalROIClaimedFormatted: formatEther(data[2] || 0n),
+        totalROIClaimedNumber: Number(formatEther(data[2] || 0n)),
         totalDirect: data[3],
         totalDirectFormatted: formatEther(data[3] || 0n),
+        totalDirectBonusNumber: Number(formatEther(data[3] || 0n)),
         totalLevel: data[4],
         totalLevelFormatted: formatEther(data[4] || 0n),
+        totalLevelBonusNumber: Number(formatEther(data[4] || 0n)),
         totalRank: data[5],
         totalRankFormatted: formatEther(data[5] || 0n),
+        totalRankBonusNumber: Number(formatEther(data[5] || 0n)),
         totalDAO: data[6],
         totalDAOFormatted: formatEther(data[6] || 0n),
+        totalDAOBonusNumber: Number(formatEther(data[6] || 0n)),
         hanaBalance: data[7],
         hanaBalanceFormatted: formatEther(data[7] || 0n),
         totalWithdrawnHana: data[8],
         totalWithdrawnHanaFormatted: formatEther(data[8] || 0n),
+        totalWithdrawnNumber: Number(formatEther(data[8] || 0n)),
         firstStakeTime: Number(data[9] || 0n),
         lastWithdrawalTime: Number(data[10] || 0n),
         validDirects: Number(data[11] || 0n),
@@ -782,7 +790,15 @@ export function useUserStakes(address) {
         provider
       );
 
-      // 1. Fetch on-chain Staked events from shared hybrid log store
+      // 1. Direct contract getUserStakes view call (fast and direct)
+      let rawStakes = [];
+      try {
+        rawStakes = await staking.getUserStakes(normalizedAddr);
+      } catch (err) {
+        console.warn("getUserStakes contract call failed, checking event fallback:", err);
+      }
+
+      // 2. Fetch on-chain Staked events for tx hash mapping
       const stakedEvents = await fetchLogsInChunks(
         staking,
         staking.filters.Staked(normalizedAddr),
@@ -795,75 +811,78 @@ export function useUserStakes(address) {
         txMap.set(idx, ev.transactionHash);
       });
 
-      // 2. Attempt contract getUserStakes view call
-      let rawStakes = [];
-      try {
-        rawStakes = await staking.getUserStakes(normalizedAddr);
-      } catch (err) {
-        console.warn("getUserStakes contract call failed, checking event fallback:", err);
-      }
-
       let parsed = [];
 
       if (rawStakes && rawStakes.length > 0) {
-        parsed = rawStakes.map((st, index) => {
-          const txHash = txMap.get(index) || null;
-          const packageId = Number(st.packageId ?? st[0] ?? 0);
-          const amount = st.amount ?? st[1] ?? 0n;
-          const pkg =
-            DEFAULT_PACKAGES.find((p) => p.id === packageId) ||
-            DEFAULT_PACKAGES[0];
+        parsed = await Promise.all(
+          rawStakes.map(async (st, index) => {
+            const txHash = txMap.get(index) || null;
+            const packageId = Number(st.packageId ?? st[0] ?? 0);
+            const amount = st.amount ?? st[1] ?? 0n;
+            const pkg =
+              DEFAULT_PACKAGES.find((p) => p.id === packageId) ||
+              DEFAULT_PACKAGES[0];
 
-          let startTime, lastClaimTime, totalClaimed, cap, active, roiBaseAmount;
-          if (st.roiBaseAmount !== undefined) {
-            roiBaseAmount = st.roiBaseAmount;
-            startTime = Number(st.startTime ?? st[3] ?? 0);
-            lastClaimTime = Number(st.lastClaimTime ?? st[4] ?? 0);
-            totalClaimed = st.totalClaimed ?? st[5] ?? 0n;
-            cap = st.cap ?? st[6] ?? 0n;
-            active = Boolean(st.active ?? st[7]);
-          } else if (st[7] !== undefined) {
-            roiBaseAmount = st[2] ?? 0n;
-            startTime = Number(st[3] ?? 0);
-            lastClaimTime = Number(st[4] ?? 0);
-            totalClaimed = st[5] ?? 0n;
-            cap = st[6] ?? 0n;
-            active = Boolean(st[7]);
-          } else {
-            roiBaseAmount = amount;
-            startTime = Number(st.startTime ?? st[2] ?? 0);
-            lastClaimTime = Number(st.lastClaimTime ?? st[3] ?? 0);
-            totalClaimed = st.totalClaimed ?? st[4] ?? 0n;
-            cap = st.cap ?? st[5] ?? (amount * BigInt(pkg.capMultiplier || 2));
-            active =
-              st.active !== undefined
-                ? Boolean(st.active)
-                : st[6] !== undefined
-                ? Boolean(st[6])
-                : true;
-          }
+            let startTime, lastClaimTime, totalClaimed, cap, active, roiBaseAmount;
+            if (st.roiBaseAmount !== undefined) {
+              roiBaseAmount = st.roiBaseAmount;
+              startTime = Number(st.startTime ?? st[3] ?? 0);
+              lastClaimTime = Number(st.lastClaimTime ?? st[4] ?? 0);
+              totalClaimed = st.totalClaimed ?? st[5] ?? 0n;
+              cap = st.cap ?? st[6] ?? 0n;
+              active = Boolean(st.active ?? st[7]);
+            } else if (st[7] !== undefined) {
+              roiBaseAmount = st[2] ?? 0n;
+              startTime = Number(st[3] ?? 0);
+              lastClaimTime = Number(st[4] ?? 0);
+              totalClaimed = st[5] ?? 0n;
+              cap = st[6] ?? 0n;
+              active = Boolean(st[7]);
+            } else {
+              roiBaseAmount = amount;
+              startTime = Number(st.startTime ?? st[2] ?? 0);
+              lastClaimTime = Number(st.lastClaimTime ?? st[3] ?? 0);
+              totalClaimed = st.totalClaimed ?? st[4] ?? 0n;
+              cap = st.cap ?? st[5] ?? (amount * BigInt(pkg.capMultiplier || 2));
+              active =
+                st.active !== undefined
+                  ? Boolean(st.active)
+                  : st[6] !== undefined
+                  ? Boolean(st[6])
+                  : true;
+            }
 
-          return {
-            stakeIndex: index,
-            packageId,
-            packageName: pkg.name,
-            dailyRate: pkg.dailyRate,
-            amount,
-            amountFormatted: formatEther(amount),
-            amountNumber: Number(formatEther(amount)),
-            roiBaseAmount,
-            roiBaseAmountFormatted: formatEther(roiBaseAmount || 0n),
-            startTime,
-            lastClaimTime,
-            totalClaimed,
-            totalClaimedFormatted: formatEther(totalClaimed || 0n),
-            cap,
-            capFormatted: formatEther(cap || 0n),
-            active,
-            txHash,
-            explorerUrl: txHash ? getExplorerTxUrl(txHash) : null,
-          };
-        });
+            let pendingRoi = 0n;
+            try {
+              pendingRoi = await staking.pendingROI(normalizedAddr, index);
+            } catch {
+              pendingRoi = 0n;
+            }
+
+            return {
+              stakeIndex: index,
+              packageId,
+              packageName: pkg.name,
+              dailyRate: pkg.dailyRate,
+              amount,
+              amountFormatted: formatEther(amount),
+              amountNumber: Number(formatEther(amount)),
+              roiBaseAmount,
+              roiBaseAmountFormatted: formatEther(roiBaseAmount || 0n),
+              startTime,
+              lastClaimTime,
+              totalClaimed,
+              totalClaimedFormatted: formatEther(totalClaimed || 0n),
+              cap,
+              capFormatted: formatEther(cap || 0n),
+              pendingRoi: Number(formatEther(pendingRoi)),
+              pendingRoiFormatted: Number(formatEther(pendingRoi)).toFixed(2),
+              active,
+              txHash,
+              explorerUrl: txHash ? getExplorerTxUrl(txHash) : null,
+            };
+          })
+        );
       }
 
       // If getUserStakes returned empty but verified Staked events exist for this wallet, reconstruct from logs!
@@ -1220,7 +1239,14 @@ export function useStakeTokens() {
           throw new Error("Please connect your wallet first.");
         }
 
+        if (resolvedPackageId === 'dao' || resolvedPackageId === 'DAO') {
+          resolvedPackageId = 5;
+        }
+
         const packageIndex = Number(resolvedPackageId);
+        if (isNaN(packageIndex)) {
+          throw new Error(`Invalid package selected: ${resolvedPackageId}`);
+        }
         const pkgConfig = DEFAULT_PACKAGES[packageIndex];
         const finalAmount =
           resolvedAmount !== undefined &&
@@ -1274,7 +1300,7 @@ export function useStakeTokens() {
           setStep("approved");
         }
 
-        // Execute stake on active contract: stake(packageId)
+        // Execute stake on active contract: stake(packageId) only — amount is pkg.minAmount on-chain
         setStep("staking");
         const staking = new Contract(
           CONTRACT_ADDRESSES.stakingContract,
@@ -1293,11 +1319,27 @@ export function useStakeTokens() {
         return { success: true, hash: stakeTx.hash };
       } catch (err) {
         console.error("Staking error:", err);
-        const msg =
+        let msg =
           err?.reason ||
           err?.shortMessage ||
+          err?.data?.message ||
           err?.message ||
-          "Failed to stake USDT into the contract.";
+          "";
+
+        // Map generic/empty revert messages to actionable text
+        if (
+          !msg ||
+          msg === "require(false)" ||
+          msg.toLowerCase().includes("require(false)") ||
+          msg.toLowerCase().includes("execution reverted") ||
+          msg.toLowerCase().includes("transaction reverted without a reason")
+        ) {
+          msg =
+            "Staking failed: the contract's internal liquidity or buyback call reverted. " +
+            "This usually means the HANA liquidity pool has insufficient funds. " +
+            "Please contact the admin or try again later.";
+        }
+
         setError(msg);
         setStep("error");
         throw new Error(msg);
@@ -1609,12 +1651,55 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
       // 2. Fetch Registered where referrer is normalizedAddr
       const regFilter = staking.filters.Registered(null, normalizedAddr);
 
-      const [incomeEvents, regEvents] = await Promise.all([
+      // First try shared sync store (fast, cached)
+      let [incomeEvents, regEvents] = await Promise.all([
         fetchLogsInChunks(staking, incomeFilter, CONTRACT_START_BLOCK).catch(() => []),
         includeRegistrations
           ? fetchLogsInChunks(staking, regFilter, CONTRACT_START_BLOCK).catch(() => [])
           : Promise.resolve([]),
       ]);
+
+      // If sync store returned nothing, fallback to direct RPC scan of last 49999 blocks
+      if (incomeEvents.length === 0 || regEvents.length === 0) {
+        try {
+          const headBlock = await provider.getBlockNumber();
+          const tailFrom = Math.max(CONTRACT_START_BLOCK, headBlock - 49999);
+
+          const incomeTopic = await incomeFilter.getTopicFilter();
+          const regTopic = await regFilter.getTopicFilter();
+
+          const [rawIncome, rawReg] = await Promise.all([
+            incomeEvents.length === 0
+              ? provider.getLogs({ address: CONTRACT_ADDRESSES.stakingContract, fromBlock: tailFrom, toBlock: headBlock, topics: incomeTopic }).catch(() => [])
+              : Promise.resolve([]),
+            (includeRegistrations && regEvents.length === 0)
+              ? provider.getLogs({ address: CONTRACT_ADDRESSES.stakingContract, fromBlock: tailFrom, toBlock: headBlock, topics: regTopic }).catch(() => [])
+              : Promise.resolve([]),
+          ]);
+
+          // Parse raw logs using the staking interface
+          if (rawIncome.length > 0 && incomeEvents.length === 0) {
+            incomeEvents = rawIncome.flatMap((log) => {
+              try {
+                const parsed = staking.interface.parseLog(log);
+                if (!parsed) return [];
+                return [{ ...log, eventName: parsed.name, args: parsed.args, logIndex: log.index ?? log.logIndex ?? 0 }];
+              } catch { return []; }
+            });
+          }
+          if (rawReg.length > 0 && regEvents.length === 0) {
+            regEvents = rawReg.flatMap((log) => {
+              try {
+                const parsed = staking.interface.parseLog(log);
+                if (!parsed) return [];
+                return [{ ...log, eventName: parsed.name, args: parsed.args, logIndex: log.index ?? log.logIndex ?? 0 }];
+              } catch { return []; }
+            });
+          }
+        } catch (rpcErr) {
+          console.warn("Direct RPC fallback for referral history failed:", rpcErr);
+        }
+      }
 
       // Cache block timestamps
       const allEvents = [...incomeEvents, ...regEvents];

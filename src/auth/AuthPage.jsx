@@ -368,6 +368,20 @@ export default function AuthPage({ mode }) {
                 </div>
               ) : (
                 <form className="hana-auth__form" onSubmit={handleRegister}>
+                  {isConnected && registrationReady && !isRegistered && (
+                    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-200">
+                      <div className="flex items-start gap-2.5">
+                        <AlertCircle size={18} className="shrink-0 text-[#FFB51D] mt-0.5" />
+                        <div>
+                          <strong className="block font-bold text-[#FFB51D]">Registration Required</strong>
+                          <span className="text-neutral-300">
+                            This wallet is not registered on the HANA Staking contract. Complete registration below to activate your account and access the dashboard.
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <label htmlFor="hana-referral">
                     Referral wallet address <span className="text-xs text-neutral-400">(optional)</span>
                   </label>
@@ -477,13 +491,18 @@ export default function AuthPage({ mode }) {
                 {isConnected && !isCheckingRegistration && (
                   <div className="my-3 rounded-lg border border-white/10 bg-white/5 p-3 text-xs">
                     {isRegistered ? (
-                      <p className="text-green-400 flex items-center gap-1.5">
+                      <p className="text-green-400 flex items-center gap-1.5 font-bold">
                         <CheckCircle2 size={15} /> Account registered on Staking Contract
                       </p>
                     ) : (
-                      <p className="text-amber-400 flex items-center gap-1.5">
-                        <AlertCircle size={15} /> This wallet is not registered yet.
-                      </p>
+                      <div className="space-y-1">
+                        <p className="text-amber-400 font-bold flex items-center gap-1.5">
+                          <AlertCircle size={15} /> This wallet is not registered yet.
+                        </p>
+                        <p className="text-neutral-400 text-[11px]">
+                          Please register your wallet address on the smart contract to access the dashboard.
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}
@@ -504,7 +523,7 @@ export default function AuthPage({ mode }) {
                       : isConnected
                       ? isRegistered
                         ? "Enter Dashboard"
-                        : "Go to Register"
+                        : "Register Wallet"
                       : "Connect wallet"}
                     <ArrowRight size={18} />
                   </button>

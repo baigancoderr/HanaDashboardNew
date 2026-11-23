@@ -1,6 +1,13 @@
 @import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;500;600;700&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
 
 body {
   background-color: #000;
@@ -23,7 +30,7 @@ html {
   font-style: normal;
 }
 
-.unbounded{
+.unbounded {
   font-family: "Unbounded", sans-serif;
   font-optical-sizing: auto;
 }
@@ -50,4 +57,269 @@ html {
 
 .dashboard-scroll::-webkit-scrollbar-thumb:hover {
   background: #ffb51d;
+}
+
+/* ========================================================
+   HANA BLOCKCHAIN MLM PLATFORM DESIGN SYSTEM UTILITIES
+   ======================================================== */
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.hana-sidebar-bg {
+  background: linear-gradient(180deg, #0755e8 0%, #053cb4 48%, #032b91 82%, #061b50 100%);
+}
+
+.hana-topbar-bg {
+  background: linear-gradient(90deg, #0645c5 0%, #0755e8 50%, #0963f6 100%);
+  box-shadow: 0 4px 20px rgba(0, 110, 255, 0.28), inset 0 -1px 0 rgba(39, 217, 255, 0.55);
+}
+
+.hana-hero-banner {
+  background: linear-gradient(110deg, #04329f 0%, #0755e8 42%, #168bff 82%, #0645c5 100%);
+  border: 1px solid rgba(39, 217, 255, 0.45);
+  box-shadow: 0 12px 32px rgba(7, 85, 232, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.hana-card {
+  background: linear-gradient(160deg, #ffffff 0%, #f5f9ff 60%, #e5f1ff 100%);
+  border: 1px solid rgba(0, 110, 255, 0.28);
+  box-shadow: 0 8px 24px rgba(6, 69, 197, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.hana-card-gold {
+  background: linear-gradient(160deg, #ffffff 0%, #fffaf0 60%, #fff2cc 100%);
+  border: 1.5px solid rgba(255, 193, 7, 0.72);
+  box-shadow: 0 10px 28px rgba(255, 184, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.hana-dark-card {
+  background: linear-gradient(135deg, #061b50 0%, #032b91 55%, #0645c5 100%);
+  border: 1px solid rgba(255, 193, 7, 0.55);
+  box-shadow: 0 12px 30px rgba(3, 43, 145, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.hana-gold-btn {
+  background: linear-gradient(180deg, #ffe98a 0%, #ffd700 42%, #ffb800 85%, #d89500 100%);
+  color: #061b50;
+  border: 1px solid rgba(255, 233, 138, 0.95);
+  box-shadow: 0 6px 18px rgba(255, 184, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.hana-gold-btn:hover:not(:disabled) {
+  filter: brightness(1.04);
+  box-shadow: 0 8px 24px rgba(255, 184, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  transform: translateY(-1px);
+}
+
+.hana-gold-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.hana-blue-btn {
+  background: linear-gradient(180deg, #168bff 0%, #0755e8 55%, #032b91 100%);
+  color: #ffffff;
+  border: 1px solid rgba(39, 217, 255, 0.5);
+  box-shadow: 0 6px 16px rgba(7, 85, 232, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.hana-blue-btn:hover:not(:disabled) {
+  filter: brightness(1.07);
+  box-shadow: 0 8px 22px rgba(0, 140, 255, 0.38);
+  transform: translateY(-1px);
+}
+
+.hana-nav-active {
+  background: linear-gradient(180deg, #ffe98a 0%, #ffd700 45%, #ffb800 100%);
+  color: #061b50 !important;
+  box-shadow: 0 6px 18px rgba(255, 193, 7, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.hana-progress-gold {
+  background: linear-gradient(90deg, #ffb800 0%, #ffd700 50%, #ffe98a 100%);
+  box-shadow: 0 0 12px rgba(255, 193, 7, 0.45);
+}
+
+.hana-progress-blue {
+  background: linear-gradient(90deg, #0755e8 0%, #168bff 60%, #27d9ff 100%);
+  box-shadow: 0 0 10px rgba(22, 139, 255, 0.38);
+}
+
+/* =============================================
+   DAO Staking Card Animations
+   ============================================= */
+
+@keyframes dao-card-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1.5px rgba(255, 215, 0, 0.5),
+      0 0 18px 4px rgba(255, 184, 0, 0.3),
+      0 0 40px 10px rgba(230, 46, 123, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(255, 215, 0, 0.9),
+      0 0 32px 10px rgba(255, 184, 0, 0.55),
+      0 0 60px 20px rgba(230, 46, 123, 0.32);
+  }
+}
+
+@keyframes dao-card-shimmer-sweep {
+  0%   { transform: translateX(-140%) skewX(-16deg); opacity: 0; }
+  10%  { opacity: 0.6; }
+  60%  { transform: translateX(160%) skewX(-16deg); opacity: 0.6; }
+  61%  { opacity: 0; }
+  100% { transform: translateX(160%) skewX(-16deg); opacity: 0; }
+}
+
+@keyframes dao-card-crown {
+  0%, 100% { transform: translateY(0) rotate(-4deg) scale(1); filter: drop-shadow(0 6px 14px rgba(255,216,77,0.45)); }
+  40%       { transform: translateY(-6px) rotate(4deg) scale(1.08); filter: drop-shadow(0 10px 22px rgba(255,216,77,0.75)); }
+  70%       { transform: translateY(-3px) rotate(-2deg) scale(1.04); }
+}
+
+@keyframes dao-card-float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-4px); }
+}
+
+.dao-card {
+  animation: dao-card-glow 2.6s ease-in-out infinite, dao-card-float 4s ease-in-out infinite;
+}
+
+.dao-card-shimmer {
+  width: 50%;
+  background: linear-gradient(
+    108deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.22) 50%,
+    transparent 80%
+  );
+  animation: dao-card-shimmer-sweep 3.2s ease-in-out infinite;
+  z-index: 5;
+  border-radius: 18px;
+}
+
+.dao-card-crown {
+  animation: dao-card-crown 3s ease-in-out infinite;
+}
+
+/* =============================================
+   Staking Package Card — Stake Now Button
+   ============================================= */
+
+.stake-now-btn {
+  background: linear-gradient(180deg, #ffe98a 0%, #ffd700 42%, #ffb800 85%, #d89500 100%);
+  border: 1px solid rgba(255, 233, 138, 0.9);
+  box-shadow:
+    0 4px 14px rgba(255, 184, 0, 0.42),
+    0 0 0 1.5px rgba(7, 85, 232, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.stake-now-btn:hover {
+  filter: brightness(1.06);
+  box-shadow:
+    0 6px 20px rgba(255, 184, 0, 0.58),
+    0 0 0 1.5px rgba(39, 217, 255, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform: translateY(-1px);
+}
+
+.stake-now-btn:active {
+  transform: translateY(0);
+}
+
+/* =============================================
+   DAO Program Sidebar Highlight & Animations
+   ============================================= */
+
+@keyframes dao-pulse-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 6px 1px rgba(255, 215, 0, 0.55),
+      0 0 14px 3px rgba(255, 184, 0, 0.30),
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 12px 3px rgba(255, 215, 0, 0.90),
+      0 0 28px 8px rgba(255, 140, 0, 0.55),
+      inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  }
+}
+
+@keyframes dao-shimmer-sweep {
+  0%   { transform: translateX(-120%) skewX(-18deg); opacity: 0.7; }
+  60%  { transform: translateX(130%)  skewX(-18deg); opacity: 0.7; }
+  100% { transform: translateX(130%)  skewX(-18deg); opacity: 0; }
+}
+
+@keyframes dao-crown-bounce {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25%       { transform: translateY(-3px) rotate(-8deg); }
+  75%       { transform: translateY(-1px) rotate(6deg); }
+}
+
+@keyframes dao-text-glow {
+  0%, 100% { text-shadow: 0 0 6px rgba(255, 215, 0, 0.5); color: #FFE566; }
+  50%       { text-shadow: 0 0 14px rgba(255, 215, 0, 0.9), 0 0 28px rgba(255, 165, 0, 0.5); color: #FFD700; }
+}
+
+@keyframes dao-badge-blink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.75; transform: scale(0.93); }
+}
+
+.dao-highlight-item {
+  background: linear-gradient(135deg, rgba(255, 184, 0, 0.18) 0%, rgba(255, 140, 0, 0.10) 60%, rgba(255, 80, 0, 0.06) 100%);
+  border: 1.5px solid rgba(255, 215, 0, 0.60);
+  animation: dao-pulse-glow 2.4s ease-in-out infinite;
+  position: relative;
+}
+
+.dao-highlight-item:hover {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.28) 0%, rgba(255, 140, 0, 0.18) 100%);
+}
+
+.dao-shimmer {
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 80%
+  );
+  pointer-events: none;
+  animation: dao-shimmer-sweep 2.8s ease-in-out infinite;
+}
+
+.dao-crown-icon {
+  animation: dao-crown-bounce 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 5px rgba(255, 215, 0, 0.8));
+}
+
+.dao-label-text {
+  animation: dao-text-glow 2.4s ease-in-out infinite;
+}
+
+.dao-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #FF6B00, #FFB800);
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 6px rgba(255, 107, 0, 0.5);
+  animation: dao-badge-blink 1.6s ease-in-out infinite;
+  line-height: 1;
 }
