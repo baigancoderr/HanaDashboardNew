@@ -342,7 +342,11 @@ function purgeLegacyLogCaches() {
     const staleKeys = [];
     for (let i = 0; i < window.localStorage.length; i += 1) {
       const key = window.localStorage.key(i);
-      if (key && key.startsWith("hana_staking_logs") && key !== LOG_SYNC_STORAGE_KEY) {
+      if (
+        key &&
+        key.startsWith("hana_staking_logs") &&
+        key !== LOG_SYNC_STORAGE_KEY
+      ) {
         staleKeys.push(key);
       }
     }
@@ -1890,9 +1894,18 @@ export function useReferralHistory(address, { includeRegistrations = true } = {}
 
       // Sort newest direct income first
       parsedIncome.sort((a, b) => b.blockNumber - a.blockNumber);
+
+      let totalDirectUsdt = sumUsdt;
+      let totalDirectHana = sumHana;
+      try {
+        const userData = await staking.users(normalizedAddr);
+        const onChainDirectUsdt = Number(formatEther(userData.totalDirect ?? userData[3] ?? 0n));
+        if (onChainDirectUsdt > 0) totalDirectUsdt = onChainDirectUsdt;
+      } catch {}
+
       setDirectIncomeHistory(parsedIncome);
-      setTotalDirectEarnedUsdt(sumUsdt);
-      setTotalDirectEarnedHana(sumHana);
+      setTotalDirectEarnedUsdt(totalDirectUsdt);
+      setTotalDirectEarnedHana(totalDirectHana);
 
       // Parse Registered events
       const parsedReg = regEvents.map((e) => {
@@ -2142,16 +2155,23 @@ export function useLevelIncomeHistory(address) {
       const parsedIncome = [...parsedPrimary, ...parsedFallback];
       parsedIncome.sort((a, b) => b.blockNumber - a.blockNumber);
 
+      let onChainLevelUsdt = sumUsdt;
+      try {
+        const userData = await staking.users(normalizedAddr);
+        const contractLevelUsdt = Number(formatEther(userData.totalLevel ?? userData[4] ?? 0n));
+        if (contractLevelUsdt > 0) onChainLevelUsdt = contractLevelUsdt;
+      } catch {}
+
       // Store in cache keyed to current log revision
       levelIncomeCache.set(cacheKey, {
         revision: dataRevision,
         incomeHistory: parsedIncome,
-        totalUsdt: sumUsdt,
+        totalUsdt: onChainLevelUsdt,
         totalHana: sumHana,
       });
 
       setIncomeHistory(parsedIncome);
-      setTotalUsdt(sumUsdt);
+      setTotalUsdt(onChainLevelUsdt);
       setTotalHana(sumHana);
       setFromCache(false);
     } catch (fetchError) {
