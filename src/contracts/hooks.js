@@ -200,7 +200,7 @@ const txRoiClaimCache = new Map();
 
 // ─── Unified Hybrid Contract Log Sync Store ──────────────────────────────────
 const stakingIface = new Interface(HANA_STAKING_ABI);
-const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v5_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
+const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v6_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
 const TAIL_BLOCK_SPAN = 49999;
 const ARCHIVE_CHUNK_SPAN = 4999; // Keep public RPC archive scans small
 const ARCHIVE_CHUNK_DELAY_MS = 700;
