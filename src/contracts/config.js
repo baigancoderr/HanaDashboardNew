@@ -1,10 +1,15 @@
-import { JsonRpcProvider } from "ethers";
+import { FallbackProvider, JsonRpcProvider } from "ethers";
 
 export const BSC_TESTNET_CHAIN_ID = 97;
 
 export const BSC_TESTNET_RPC = "https://bsc-testnet.publicnode.com";
 export const BSC_TESTNET_RPC_FALLBACK = "https://data-seed-prebsc-1-s1.binance.org:8545";
-export const BSC_TESTNET_ARCHIVE_RPC = "https://bnb-testnet.api.onfinality.io/public";
+export const BSC_TESTNET_RPC_URLS = [
+  BSC_TESTNET_RPC,
+  "https://bsc-testnet.bnbchain.org",
+  BSC_TESTNET_RPC_FALLBACK,
+  "https://bsc-testnet.drpc.org",
+];
 
 // Deployment block for the active staking contract (0xA73e7D9fF5e274204C21Cd30284Dfd257713e551).
 // Constructor emits Registered for the owner in block 143057815. Do not scan earlier
@@ -14,27 +19,33 @@ export const CONTRACT_START_BLOCK = 143057815;
 let _readOnlyProvider = null;
 export const getReadOnlyProvider = () => {
   if (!_readOnlyProvider) {
-    _readOnlyProvider = new JsonRpcProvider(BSC_TESTNET_RPC, {
-      chainId: BSC_TESTNET_CHAIN_ID,
-      name: "bscTestnet",
-    });
+    const providers = BSC_TESTNET_RPC_URLS.map(
+      (url, index) =>
+        new JsonRpcProvider(
+          url,
+          {
+            chainId: BSC_TESTNET_CHAIN_ID,
+            name: "bscTestnet",
+          },
+          { staticNetwork: true, polling: false }
+        )
+    );
+    _readOnlyProvider = new FallbackProvider(
+      providers.map((provider, index) => ({
+        provider,
+        priority: index + 1,
+        stallTimeout: 2500,
+        weight: 1,
+      })),
+      BSC_TESTNET_CHAIN_ID,
+      { quorum: 1 }
+    );
   }
   return _readOnlyProvider;
 };
 
-let _archiveProvider = null;
 export const getArchiveProvider = () => {
-  if (!_archiveProvider) {
-    _archiveProvider = new JsonRpcProvider(
-      BSC_TESTNET_ARCHIVE_RPC,
-      {
-        chainId: BSC_TESTNET_CHAIN_ID,
-        name: "bscTestnet",
-      },
-      { staticNetwork: true, polling: false }
-    );
-  }
-  return _archiveProvider;
+  return getReadOnlyProvider();
 };
 
 export const CONTRACT_ADDRESSES = {

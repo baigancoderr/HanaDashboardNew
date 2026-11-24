@@ -62,6 +62,7 @@ export function Web3Provider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
   const hasLoadedAddress = useRef(false);
   const activeAddressRef = useRef(null);
+  const refreshInFlightRef = useRef(null);
   const [isTransacting, setIsTransacting] = useState(false);
   const [txMessage, setTxMessage] = useState("");
   const [toast, setToast] = useState(null);
@@ -73,6 +74,9 @@ export function Web3Provider({ children }) {
 
   // Fetch all user and protocol data from contract
   const refreshData = useCallback(async () => {
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+
     const requestedAddress = address || null;
     activeAddressRef.current = requestedAddress;
     const stillCurrent = () => activeAddressRef.current === requestedAddress;
@@ -231,6 +235,7 @@ export function Web3Provider({ children }) {
     } catch (error) {
       console.warn("refreshData error:", error);
     } finally {
+      refreshInFlightRef.current = false;
       if (shouldShowLoading && stillCurrent()) {
         hasLoadedAddress.current = requestedAddress;
         setIsLoading(false);
@@ -241,7 +246,7 @@ export function Web3Provider({ children }) {
   // Initial load and periodic refresh
   useEffect(() => {
     refreshData();
-    const interval = setInterval(refreshData, 15000); // 15 sec poll
+    const interval = setInterval(refreshData, 30000); // 30 sec poll
     return () => clearInterval(interval);
   }, [refreshData]);
 

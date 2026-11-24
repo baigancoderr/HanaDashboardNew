@@ -14,7 +14,6 @@ export const USE_MAINNET = false;
 
 const DEFAULT_BSC_TESTNET_RPCS = [
   "https://bsc-testnet.publicnode.com",
-  "https://bnb-testnet.api.onfinality.io/public",
   "https://bsc-testnet.bnbchain.org",
   "https://bsc-testnet.drpc.org",
   "https://data-seed-prebsc-1-s1.binance.org:8545",

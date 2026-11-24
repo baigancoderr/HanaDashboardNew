@@ -202,7 +202,7 @@ const txRoiClaimCache = new Map();
 const stakingIface = new Interface(HANA_STAKING_ABI);
 const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v4_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
 const TAIL_BLOCK_SPAN = 49999;
-const ARCHIVE_CHUNK_SPAN = 9999; // 10,000 blocks inclusive (OnFinality max)
+const ARCHIVE_CHUNK_SPAN = 4999; // Keep public RPC archive scans small
 const ARCHIVE_CHUNK_DELAY_MS = 700;
 
 const logSyncStore = {

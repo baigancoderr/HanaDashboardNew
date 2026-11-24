@@ -41,6 +41,9 @@ async function sendViaPublicRpc(method, params = []) {
         }),
         signal: controller.signal,
       });
+      if (response.status === 429 || response.status >= 500) {
+        throw new Error(`RPC HTTP ${response.status}`);
+      }
       const payload = await response.json();
       if (payload.error) {
         throw new Error(payload.error.message ?? "RPC error");
