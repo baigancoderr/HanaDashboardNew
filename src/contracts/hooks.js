@@ -200,7 +200,7 @@ const txRoiClaimCache = new Map();
 
 // ─── Unified Hybrid Contract Log Sync Store ──────────────────────────────────
 const stakingIface = new Interface(HANA_STAKING_ABI);
-const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v4_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
+const LOG_SYNC_STORAGE_KEY = `hana_staking_logs_v5_${CONTRACT_ADDRESSES.stakingContract.toLowerCase()}`;
 const TAIL_BLOCK_SPAN = 49999;
 const ARCHIVE_CHUNK_SPAN = 4999; // Keep public RPC archive scans small
 const ARCHIVE_CHUNK_DELAY_MS = 700;
@@ -2006,15 +2006,65 @@ export function useLevelIncomeHistory(address) {
         fetchLogsInChunks(staking, incomeFilter, CONTRACT_START_BLOCK),
       ]);
 
-      const levelTxSet = new Set(levelEvents.map((e) => e.transactionHash));
-      const fallbackLevelIncomeEvents = incomeEvents.filter((event) => {
+      let recentLevelEvents = levelEvents;
+      let recentIncomeEvents = incomeEvents;
+      if (recentLevelEvents.length === 0 || recentIncomeEvents.length === 0) {
+        try {
+          const headBlock = await provider.getBlockNumber();
+          const tailFrom = Math.max(CONTRACT_START_BLOCK, headBlock - TAIL_BLOCK_SPAN);
+          const [rawLevel, rawIncome] = await Promise.all([
+            recentLevelEvents.length === 0
+              ? provider.getLogs({
+                  address: CONTRACT_ADDRESSES.stakingContract,
+                  fromBlock: tailFrom,
+                  toBlock: headBlock,
+                  topics: await levelFilter.getTopicFilter(),
+                }).catch(() => [])
+              : Promise.resolve([]),
+            recentIncomeEvents.length === 0
+              ? provider.getLogs({
+                  address: CONTRACT_ADDRESSES.stakingContract,
+                  fromBlock: tailFrom,
+                  toBlock: headBlock,
+                  topics: await incomeFilter.getTopicFilter(),
+                }).catch(() => [])
+              : Promise.resolve([]),
+          ]);
+
+          if (rawLevel.length > 0) {
+            recentLevelEvents = [
+              ...recentLevelEvents,
+              ...rawLevel.map((log) => ({
+                ...staking.interface.parseLog(log),
+                blockNumber: log.blockNumber,
+                transactionHash: log.transactionHash,
+                logIndex: log.index,
+              })),
+            ];
+          }
+          if (rawIncome.length > 0) {
+            recentIncomeEvents = [
+              ...recentIncomeEvents,
+              ...rawIncome.map((log) => ({
+                ...staking.interface.parseLog(log),
+                blockNumber: log.blockNumber,
+                transactionHash: log.transactionHash,
+                logIndex: log.index,
+              })),
+            ];
+          }
+        } catch {}
+      }
+
+      const levelTxSet = new Set(recentLevelEvents.map((e) => e.transactionHash));
+      const fallbackLevelIncomeEvents = recentIncomeEvents.filter((event) => {
         const incomeType = (event.args?.[3] ?? event.args?.incomeType ?? "")
           .toString()
           .toLowerCase();
         return incomeType.includes("level") && !levelTxSet.has(event.transactionHash);
       });
 
-      const relevantEvents = [...levelEvents, ...fallbackLevelIncomeEvents];
+      const relevantEvents = [...recentLevelEvents, ...fallbackLevelIncomeEvents];
       await Promise.all([
         populateBlockTimestamps(provider, relevantEvents),
         populateTxSenders(provider, fallbackLevelIncomeEvents),
@@ -2067,7 +2117,7 @@ export function useLevelIncomeHistory(address) {
         };
       };
 
-      const parsedPrimary = levelEvents.map((event) =>
+      const parsedPrimary = recentLevelEvents.map((event) =>
         buildLevelIncomeRow({
           fromAddress: event.args?.[0] ?? event.args?.from,
           level: Number(event.args?.[2] ?? event.args?.level ?? 0n),
@@ -2890,7 +2940,29 @@ export function useTeamByLevel(address) {
             slice.map(async (parent) => {
               try {
                 const filter   = staking.filters.Registered(null, parent);
-                const evts     = await fetchLogsInChunks(staking, filter, fromBlock, currentBlock).catch(() => []);
+                let evts = await fetchLogsInChunks(staking, filter, fromBlock, currentBlock).catch(() => []);
+
+                if (evts.length === 0) {
+                  try {
+                    const headBlock = await provider.getBlockNumber();
+                    const tailFrom = Math.max(CONTRACT_START_BLOCK, headBlock - TAIL_BLOCK_SPAN);
+                    const topics = await filter.getTopicFilter();
+                    const raw = await provider.getLogs({
+                      address: CONTRACT_ADDRESSES.stakingContract,
+                      fromBlock: tailFrom,
+                      toBlock: headBlock,
+                      topics,
+                    });
+                    evts = raw.map((log) => ({
+                      ...staking.interface.parseLog(log),
+                      blockNumber: log.blockNumber,
+                      transactionHash: log.transactionHash,
+                      logIndex: log.index,
+                    }));
+                  } catch {
+                    evts = [];
+                  }
+                }
                 const children = evts
                   .map((e) => e.args?.[0] ?? e.args?.user)
                   .filter(Boolean)
